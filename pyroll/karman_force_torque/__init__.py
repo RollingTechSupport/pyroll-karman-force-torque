@@ -1,7 +1,6 @@
 from . import roll_pass
-from . import report
 
-VERSION = "3.0.0a1"
+VERSION = "3.1.0a1"
 
 
 import importlib.util
@@ -13,9 +12,3 @@ if REPORT_INSTALLED:
     import pyroll.report
 
     pyroll.report.plugin_manager.register(report)
-
-
-
-
-
-
