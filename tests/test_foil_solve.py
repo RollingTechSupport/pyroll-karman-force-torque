@@ -89,7 +89,7 @@ def test_normal_pass_stays_on_rigid_solver(caplog):
     )
     PassSequence([roll_pass]).solve(in_profile)
 
-    assert roll_pass.foil_rolling_condition is False
+    assert not roll_pass.foil_rolling_condition
     assert isinstance(roll_pass.karman_solution, KarmanSolver)
 
 
@@ -142,9 +142,8 @@ def test_foil_solver_converges_and_reduces_force_with_stiffer_roll():
     steel = _build_pass(roll_elastic_modulus=210e9, hitchcock_limit=1.0)
     ceramic = _build_pass(roll_elastic_modulus=310e9, hitchcock_limit=1.0)
 
-    assert steel.foil_rolling_condition is True
-    assert ceramic.foil_rolling_condition is True
-
+    assert steel.foil_rolling_condition
+    assert ceramic.foil_rolling_condition
     assert steel.roll_force > 0
     assert ceramic.roll_force > 0
     assert steel.roll.roll_torque > 0
