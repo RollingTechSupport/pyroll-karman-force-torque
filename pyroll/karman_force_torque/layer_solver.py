@@ -329,7 +329,7 @@ class LayerPassSection:
             rhs, event = self._entry_rhs_and_event(active, xn)
             sol = solve_ivp(
                 rhs, [x_current, xn], y0, events=event, dense_output=True,
-                max_step=self.ld / 50,
+                rtol=1e-8, atol=1e-6,
             )
             x_end = sol.t_events[0][0] if sol.t_events[0].size else xn
             xs = np.linspace(x_current, x_end, max(2, int((x_end - x_current) / (self.ld / 100)) + 1))
@@ -345,7 +345,7 @@ class LayerPassSection:
             # Reached max switches without full plastification or the neutral
             # point - continue with whatever set is currently active up to xn.
             rhs, _ = self._entry_rhs_and_event(active, xn)
-            sol = solve_ivp(rhs, [x_current, xn], y0, dense_output=True, max_step=self.ld / 50)
+            sol = solve_ivp(rhs, [x_current, xn], y0, dense_output=True, rtol=1e-8, atol=1e-6)
             xs = np.linspace(x_current, xn, max(2, int((xn - x_current) / (self.ld / 100)) + 1))
             ys = sol.sol(xs)
             segments.append((active, xs, ys))
@@ -446,7 +446,7 @@ class LayerPassSection:
             rhs, event = self._exit_rhs_and_event(frozenset(remaining), xn)
             sol = solve_ivp(
                 rhs, [x_current, far_end], y0, events=event, dense_output=True,
-                max_step=self.ld / 50,
+                rtol=1e-8, atol=1e-6,
             )
             x_end = sol.t_events[0][0] if sol.t_events[0].size else far_end
             xs = np.linspace(x_current, x_end, max(2, int((x_end - x_current) / (self.ld / 100)) + 1))
@@ -463,7 +463,7 @@ class LayerPassSection:
         rhs, event = self._exit_rhs_and_event(frozenset(), xn, separation_event=True)
         sol = solve_ivp(
             rhs, [x_current, far_end], self._to_pure_elastic_state(y0, remaining), events=event,
-            dense_output=True, max_step=self.ld / 50,
+            dense_output=True, rtol=1e-8, atol=1e-6,
         )
         x_end = sol.t_events[0][0] if sol.t_events[0].size else far_end
         xs = np.linspace(x_current, x_end, max(2, int((x_end - x_current) / (self.ld / 100)) + 1))
