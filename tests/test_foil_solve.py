@@ -95,17 +95,23 @@ def test_normal_pass_stays_on_rigid_solver(caplog):
 
 def test_hitchcock_ratio_exceeds_default_limit_for_thin_foil():
     """The report's own worked example (Abb. 9, kf=1000 N/mm^2, h0=0.03/h1=0.015mm,
-    d=25mm) is deep in Hitchcock-invalid territory (r'/r >> 2). The pass is kept
-    off the foil solver here (an explicit, very high override) so the test stays
-    fast and only exercises the ratio computation itself, falling back to the
-    layer model's medium (layer_count=1) configuration instead; the actual
-    dispatch to FoilRollingSolver for this specific, very aggressive single-pass
-    reduction is covered qualitatively, not by this fast test - see
+    d=25mm) is deep in Hitchcock-invalid territory (r'/r >> 2). This checks the
+    ratio computation itself, exactly as ``foil_rolling_condition``'s own
+    hookimpl does it: from a flat (rigid-roll) force estimate, not from
+    whichever solver ends up actually dispatched for the pass (with elastic
+    properties set, that's always the layer model here since
+    ``foil_rolling_hitchcock_limit`` is overridden sky-high to force
+    ``foil_rolling_condition`` False) - the elastic-plastic layer model's own,
+    much lower, force is a different quantity and would not exercise the same
+    ratio the report's worked example refers to. The actual dispatch to
+    FoilRollingSolver for this specific, very aggressive single-pass reduction
+    is covered qualitatively, not by this test - see
     test_foil_solver_converges_and_reduces_force_with_stiffer_roll for a
     convergence check on a more moderate (but still foil-rolling-regime) pass.
     """
     import pyroll.karman_force_torque
     from pyroll.karman_force_torque.condition import hitchcock_radius_ratio
+    from pyroll.karman_force_torque.karman_solver import KarmanSolver
 
     kf = 1000e6
     in_profile = Profile.box(
@@ -133,7 +139,8 @@ def test_hitchcock_ratio_exceeds_default_limit_for_thin_foil():
     )
     PassSequence([roll_pass]).solve(in_profile)
 
-    ratio = hitchcock_radius_ratio(roll_pass, roll_pass.karman_solution.roll_force_per_unit_width)
+    flat_solution = KarmanSolver(roll_pass=roll_pass)
+    ratio = hitchcock_radius_ratio(roll_pass, flat_solution.roll_force_per_unit_width)
     assert ratio >= 2.0  # the report's stated default limit (foil_rolling_hitchcock_limit)
 
 
