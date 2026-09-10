@@ -324,14 +324,13 @@ class LayerPassSection:
         segments = []
         x_current = self.x0
         for _ in range(ns + 1):
-            if active == frozenset(range(ns)):
-                break
             rhs, event = self._entry_rhs_and_event(active, xn)
             sol = solve_ivp(
                 rhs, [x_current, xn], y0, events=event, dense_output=True,
                 rtol=1e-8, atol=1e-6,
             )
-            x_end = sol.t_events[0][0] if sol.t_events[0].size else xn
+            has_event = event is not None and sol.t_events[0].size
+            x_end = sol.t_events[0][0] if has_event else xn
             xs = np.linspace(x_current, x_end, max(2, int((x_end - x_current) / (self.ld / 100)) + 1))
             ys = sol.sol(xs)
             segments.append((active, xs, ys))
@@ -339,23 +338,17 @@ class LayerPassSection:
             x_current = x_end
             if x_current >= xn - 1e-12:
                 break
-            active = self._grow_active_set(active, y0, x_current)
-
-        if x_current < xn - 1e-9 and active != frozenset(range(ns)):
-            # Reached max switches without full plastification or the neutral
-            # point - continue with whatever set is currently active up to xn.
-            rhs, _ = self._entry_rhs_and_event(active, xn)
-            sol = solve_ivp(rhs, [x_current, xn], y0, dense_output=True, rtol=1e-8, atol=1e-6)
-            xs = np.linspace(x_current, xn, max(2, int((xn - x_current) / (self.ld / 100)) + 1))
-            ys = sol.sol(xs)
-            segments.append((active, xs, ys))
-            y0 = ys[:, -1]
+            new_active = self._grow_active_set(active, y0, x_current)
+            y0 = self._reshape_state_for_active(y0, active, new_active)
+            active = new_active
+        else:
+            log.warning("Layer model: entry zone-chain hit max switches before reaching xn.")
 
         force, torque = _integrate_force_torque(segments, self._sigma_y_of_state)
         return {
             "segments": segments,
             "state_at_xn": y0,
-            "active_at_xn": segments[-1][0] if segments else frozenset(),
+            "active_at_xn": active,
             "force": force,
             "torque": torque,
         }
@@ -457,7 +450,9 @@ class LayerPassSection:
             if not sol.t_events[0].size:
                 remaining = set()
                 break
-            remaining = self._shrink_active_set(frozenset(remaining), y0, x_current)
+            new_remaining = self._shrink_active_set(frozenset(remaining), y0, x_current)
+            y0 = self._reshape_state_for_active(y0, frozenset(remaining), frozenset(new_remaining))
+            remaining = new_remaining
 
         # final elastic recovery zone until separation (sigma_y -> 0)
         rhs, event = self._exit_rhs_and_event(frozenset(), xn, separation_event=True)
@@ -537,7 +532,7 @@ class LayerPassSection:
     def _to_pure_elastic_state(self, y, active_still_notionally):
         ns = self.ns
         sigma_xm = y[0]
-        sigma_y = self._sigma_y_of_state(y, frozenset())
+        sigma_y = self._sigma_y_of_state(y, frozenset(active_still_notionally))
         sigma_z = (sigma_xm + sigma_y) / 2
         h = y[3:3 + ns]
         t = y[3 + ns:3 + 2 * ns]
@@ -548,6 +543,22 @@ class LayerPassSection:
         elastic = [i for i in range(ns) if i not in active]
         sigma_y, _ = self._decompose_state(y, active, elastic)
         return sigma_y
+
+    def _reshape_state_for_active(self, y, old_active, new_active):
+        """Re-express a state vector at a zone boundary where the active
+        (plastic) layer set changes, keeping the shared padded layout
+        (SigmaXM, [pad, pad], H(ns), T(ns), SigmaX(elastic layers)) intact
+        so every segment's state vector has a well-defined, consistent
+        length and index meaning regardless of which layers are active."""
+        ns = self.ns
+        sigma_xm = y[0]
+        h = y[3:3 + ns]
+        t = y[3 + ns:3 + 2 * ns]
+        old_elastic = [i for i in range(ns) if i not in old_active]
+        _, sigma_x_layers = self._decompose_state(y, frozenset(old_active), old_elastic)
+        new_elastic = [i for i in range(ns) if i not in new_active]
+        new_sigma_x = [sigma_x_layers[i] for i in new_elastic]
+        return np.concatenate([[sigma_xm, 0.0, 0.0], h, t, new_sigma_x])
 
     # -------------------------------------------------------- shared physics
 
@@ -664,7 +675,7 @@ class LayerPassSection:
             dsx = -(sigma_x_i * dh[i] + tau_upper - tau_lower - pn_upper * np.tan(alpha_upper) + pn_lower * np.tan(alpha_lower)) / h[i]
             d_sigma_x_elastic.append(dsx)
 
-        return np.concatenate([[d_sigma_xm], dh, dt, d_sigma_x_elastic])
+        return np.concatenate([[d_sigma_xm, 0.0, 0.0], dh, dt, d_sigma_x_elastic])
 
     def _dh_dx(self, active, elastic, h, t, phi_v, kf_layers, dhtot, x, rw):
         s = self.solver
