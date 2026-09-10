@@ -3,6 +3,8 @@ import logging
 import pytest
 from pyroll.core import Profile, PassSequence, RollPass, Roll, FlatGroove
 
+import pyroll.karman_force_torque  # noqa: F401  (registers the foil_rolling_* hooks)
+
 
 def _flow_stress(kf):
     def hookimpl(self):
@@ -91,10 +93,18 @@ def test_normal_pass_stays_on_rigid_solver(caplog):
     assert isinstance(roll_pass.karman_solution, KarmanSolver)
 
 
-def test_foil_condition_triggers_for_thin_foil():
+def test_hitchcock_ratio_exceeds_default_limit_for_thin_foil():
     """The report's own worked example (Abb. 9, kf=1000 N/mm^2, h0=0.03/h1=0.015mm,
-    d=25mm) is deep in Hitchcock-invalid territory (r'/r >> 2)."""
+    d=25mm) is deep in Hitchcock-invalid territory (r'/r >> 2). The pass is kept
+    on the rigid solver here (an explicit, very high override) so the test stays
+    fast and only exercises the ratio computation itself; the actual dispatch
+    to FoilRollingSolver for this specific, very aggressive single-pass
+    reduction is covered qualitatively, not by this fast test - see
+    test_foil_solver_converges_and_reduces_force_with_stiffer_roll for a
+    convergence check on a more moderate (but still foil-rolling-regime) pass.
+    """
     import pyroll.karman_force_torque
+    from pyroll.karman_force_torque.condition import hitchcock_radius_ratio
 
     kf = 1000e6
     in_profile = Profile.box(
@@ -115,10 +125,12 @@ def test_foil_condition_triggers_for_thin_foil():
         coulomb_friction_coefficient=0.05,
         back_tension=0,
         front_tension=0,
+        foil_rolling_hitchcock_limit=1e12,
     )
     PassSequence([roll_pass]).solve(in_profile)
 
-    assert roll_pass.foil_rolling_condition is True
+    ratio = hitchcock_radius_ratio(roll_pass, roll_pass.karman_solution.roll_force_per_unit_width)
+    assert ratio >= 2.0  # the report's stated default limit (foil_rolling_hitchcock_limit)
 
 
 @pytest.mark.slow
