@@ -96,9 +96,10 @@ def test_normal_pass_stays_on_rigid_solver(caplog):
 def test_hitchcock_ratio_exceeds_default_limit_for_thin_foil():
     """The report's own worked example (Abb. 9, kf=1000 N/mm^2, h0=0.03/h1=0.015mm,
     d=25mm) is deep in Hitchcock-invalid territory (r'/r >> 2). The pass is kept
-    on the rigid solver here (an explicit, very high override) so the test stays
-    fast and only exercises the ratio computation itself; the actual dispatch
-    to FoilRollingSolver for this specific, very aggressive single-pass
+    off the foil solver here (an explicit, very high override) so the test stays
+    fast and only exercises the ratio computation itself, falling back to the
+    layer model's medium (layer_count=1) configuration instead; the actual
+    dispatch to FoilRollingSolver for this specific, very aggressive single-pass
     reduction is covered qualitatively, not by this fast test - see
     test_foil_solver_converges_and_reduces_force_with_stiffer_roll for a
     convergence check on a more moderate (but still foil-rolling-regime) pass.
@@ -110,6 +111,7 @@ def test_hitchcock_ratio_exceeds_default_limit_for_thin_foil():
     in_profile = Profile.box(
         height=0.03e-3, width=300e-3, temperature=293.15, strain=0,
         material=["dummy"], elastic_modulus=210e9, poissons_ratio=0.3,
+        specific_heat_capacity=500.0, thermal_conductivity=25.0, density=7000.0,
         flow_stress_function=_flow_stress(kf),
     )
     roll_pass = RollPass(
@@ -120,6 +122,8 @@ def test_hitchcock_ratio_exceeds_default_limit_for_thin_foil():
             rotational_frequency=1,
             elastic_modulus=210e9,
             poissons_ratio=0.3,
+            temperature=293.15,
+            specific_heat_capacity=450.0, thermal_conductivity=40.0, density=7850.0,
         ),
         gap=0.015e-3,
         coulomb_friction_coefficient=0.05,
