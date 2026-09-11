@@ -20,8 +20,15 @@ friction, single homogeneous slab, no thermal coupling), this solver models:
   different local velocities, using a fixed inner-friction coefficient);
 - full per-layer thermal coupling (conduction to neighbors and to the
   rolls, deformation heat, friction heat, convective transport), coupled
-  back into each layer's own flow stress;
-- classical (linear) Hitchcock roll flattening as an outer iteration.
+  back into each layer's own flow stress.
+
+Roll flattening is out of scope here, same as for KarmanSolver and
+FoilRollingSolver's own base radius: this solver reads ``Roll.working_radius``
+once and does not re-derive or iterate on it. A separate plugin providing a
+Hitchcock (or other) flattened radius via that hook is picked up
+transparently; this plugin's own ``hitchcock_radius_ratio`` (see
+``condition.py``) is only ever used to *classify* a pass for dispatch
+(``foil_rolling_condition``), never fed back into a calculation.
 
 All quantities are SI, matching ``pyroll-core`` conventions. Layers are
 indexed ``0..layer_count-1`` from the (arbitrarily chosen) "top" roll to
@@ -83,7 +90,6 @@ class LayerRollingSolver:
             smoothness: float = 0.01,
             plateau_width: float = 0.0,
             pressure_smoothness: float = 0.1,
-            max_hitchcock_iterations: int = 20,
             max_neutral_point_iterations: int = 20,
             tolerance: float = 1e-3,
     ):
@@ -92,12 +98,11 @@ class LayerRollingSolver:
         self.smoothness = smoothness
         self.plateau_width = plateau_width
         self.pressure_smoothness = pressure_smoothness
-        self.max_hitchcock_iterations = max_hitchcock_iterations
         self.max_neutral_point_iterations = max_neutral_point_iterations
         self.tolerance = tolerance
 
         self._setup()
-        self._solve_hitchcock_loop()
+        self._solve()
         self._finalize()
 
     # ------------------------------------------------------------------ setup
@@ -111,9 +116,6 @@ class LayerRollingSolver:
         self.nominal_radius = roll.working_radius
         self.gap = rp.gap
         self.rotational_frequency = roll.rotational_frequency
-
-        self.e_r = roll.elastic_modulus
-        self.nu_r = roll.poissons_ratio
 
         self.nu_m = profile.poissons_ratio
         self.h0_tot = profile.equivalent_height
@@ -198,33 +200,18 @@ class LayerRollingSolver:
         pn = -sigma_y - tau_r * np.tan(alpha)
         return tau_r, pn
 
-    # ---------------------------------------------------------- flattening
+    # ------------------------------------------------------------------ solve
 
-    def _hitchcock_radius(self, force_per_width):
-        c = 16 * (1 - self.nu_r ** 2) / (np.pi * self.e_r)
-        ratio = 1 + c * force_per_width / (self.h0_tot - self.gap)
-        return ratio * self.nominal_radius
-
-    # -------------------------------------------------------------- outer loop
-
-    def _solve_hitchcock_loop(self):
-        rw = self.nominal_radius
-        xn_guess = None
-        for iteration in range(self.max_hitchcock_iterations):
-            section = LayerPassSection(self, rw)
-            xn_guess = section.solve(xn_guess)
-            force = section.force_per_width
-            rw_new = self._hitchcock_radius(force)
-            log.debug(f"Layer model Hitchcock iter {iteration}: force={force:.4e} N/m, rw={rw_new:.6e} m")
-            converged = abs(rw_new - rw) < self.tolerance * rw_new
-            rw = rw_new
-            if converged:
-                break
-        else:
-            log.warning("Layer model Hitchcock flattening did not converge within max iterations.")
-
-        self.working_radius = rw
-        self.section = section
+    def _solve(self):
+        # Roll flattening (if any) is out of scope for this solver: it is
+        # the concern of whatever hookimpl provides Roll.working_radius (a
+        # separate Hitchcock-flattening plugin, say) - this solver just
+        # reads that hook's result once, like KarmanSolver and
+        # FoilRollingSolver already do, rather than re-deriving a flattened
+        # radius itself and feeding it back into its own calculation.
+        self.working_radius = self.nominal_radius
+        self.section = LayerPassSection(self, self.working_radius)
+        self.section.solve()
 
     # ---------------------------------------------------------------- results
 
