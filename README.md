@@ -11,12 +11,11 @@ covering the full range from thick slabs to metal foils:
   aren't set at all.
 - **`LayerRollingSolver`** (medium and thick passes) - adds elastic
   entry/exit zones, a mixed Coulomb/stiction friction law (Bay & Wanheim),
-  through-thickness resolution into multiple layers with full thermal
-  coupling, and classical (linear) Hitchcock roll flattening. Ports Max
-  Weiner's thesis work (TU Bergakademie Freiberg). Single-layer
-  (`layer_count=1`) is the "medium"/Orowan-like configuration; multiple
-  layers resolve the "thick slab" case where surface and core develop
-  meaningfully different flow stress through the pass.
+  and through-thickness resolution into multiple layers with full thermal
+  coupling. Ports Max Weiner's thesis work (TU Bergakademie Freiberg).
+  Single-layer (`layer_count=1`) is the "medium"/Orowan-like configuration;
+  multiple layers resolve the "thick slab" case where surface and core
+  develop meaningfully different flow stress through the pass.
 - **`FoilRollingSolver`** (foil rolling) - computes the true,
   elastically-flattened (generally non-circular) roll-gap shape instead of
   assuming a circular contact, following Mauk & Overhagen, "Prozessmodell
@@ -36,6 +35,15 @@ the roll and the profile; the layer model's thermal coupling additionally
 needs `specific_heat_capacity`/`thermal_conductivity`/`density` on both.
 Without the elastic properties, the plugin falls back to the classical
 rigid-roll model.
+
+Roll flattening itself is out of this plugin's scope: all three solvers
+just read `Roll.working_radius` once, the same hook `pyroll-core` already
+provides, rather than deriving or iterating on a flattened radius
+themselves. A separate plugin hooking `Roll.working_radius` (e.g. with
+Hitchcock's relation) is picked up transparently by whichever solver
+runs; this plugin's own Hitchcock ratio (`hitchcock_radius_ratio` in
+`condition.py`) is used purely to classify a pass for dispatch
+(`foil_rolling_condition`), never fed back into a calculation.
 
 For the docs, see [here](docs/docs.pdf) (source in [`docs/docs.tex`](docs/docs.tex)).
 
