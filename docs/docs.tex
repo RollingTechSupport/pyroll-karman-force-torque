@@ -30,7 +30,7 @@
         \item a full elastic-contour foil-rolling model (\autoref{sec:foil-model}), used once elastic roll flattening becomes so severe that a circular roll-gap assumption is no longer valid.
     \end{itemize}
 
-    \autoref{sec:dispatch} explains the criteria used to select between the four, and \autoref{sec:usage-instructions} lists the hooks the plugin defines.
+    \autoref{sec:dispatch} explains the criteria used to select between the four, and \autoref{sec:usage-instructions} lists the hooks the plugin defines. A fifth model, Orowan's own 1943 hot-rolling theory (\autoref{sec:orowan-model}), is also implemented but deliberately kept outside this automatic selection - \autoref{sec:orowan-model} explains why and how it is used instead.
 
 
     \section{Rigid-roll model (von-Kármán)}\label{sec:model-approach}
@@ -82,7 +82,7 @@
 
     Like \lstinline{KarmanSolver}, this solver is rigid-plastic: it has no elastic entry/exit zones and no thermal coupling - those are a separate refinement, orthogonal to the friction-law refinement here, and are covered instead by the layer model once a pass is thick enough to need them (\autoref{sec:dispatch}).
 
-    This is \emph{not} Orowan's own 1943 slab theory~\cite{Orowan1943}, despite addressing the same underlying observation (that pure Coulomb friction becomes unrealistic once passes are thick or high-friction enough). Orowan's actual model replaces the straight strip-element boundaries of \autoref{fig:elementary-stripe} with circular arcs, centred on the roll-gap symmetry line and meeting the roll surfaces at right angles, and corrects the horizontal force balance with an inhomogeneity function $\omega(a,\alpha)$ - an integral over the arc's polar angle - that captures genuinely non-uniform through-thickness deformation directly, rather than refining the friction law on top of the same homogeneous-strip geometry as \autoref{sec:model-approach}. Orowan himself noted the general theory was too complex for practical calculation at the time; later simplifications (e.g.\ Sims' application of it to hot rolling with sticking friction throughout) are reported to give unrealistic results (forming efficiencies above 100\%) under some conditions. Implementing Orowan's actual inhomogeneity-function theory is not attempted here.
+    This is \emph{not} Orowan's own 1943 slab theory~\cite{Orowan1943}, despite addressing the same underlying observation (that pure Coulomb friction becomes unrealistic once passes are thick or high-friction enough). Orowan's actual model replaces the straight strip-element boundaries of \autoref{fig:elementary-stripe} with circular arcs, centred on the roll-gap symmetry line and meeting the roll surfaces at right angles, and corrects the horizontal force balance with an inhomogeneity function $\omega(a,\alpha)$ - an integral over the arc's polar angle - that captures genuinely non-uniform through-thickness deformation directly, rather than refining the friction law on top of the same homogeneous-strip geometry as \autoref{sec:model-approach}. Orowan himself noted the general theory was too complex for practical calculation at the time; later simplifications (e.g.\ Sims' application of it to hot rolling with sticking friction throughout) are reported to give unrealistic results (forming efficiencies above 100\%) under some conditions. \autoref{sec:orowan-model} implements Orowan's own inhomogeneity-function theory (its sticking-friction branch) as a separate, explicitly-selected model, rather than as a further refinement dispatched automatically alongside the models above.
 
 
     \section{Elastic-plastic layer model for thick passes}\label{sec:layer-model}
@@ -129,6 +129,49 @@
     All three limits are themselves hooks (\autoref{tab:hookspecs}) and can be overridden per pass, including forcing a particular model unconditionally. \lstinline{KarmanMixedFrictionSolver} does not itself need the elastic properties or thermal data the other refinements do, but is kept behind the same elastic-properties gate as step 1 for consistency, rather than being dispatched independently of it.
 
 
+    \section{Orowan's (1943) hot-rolling model}\label{sec:orowan-model}
+
+    Every model in \autoref{sec:model-approach}--\autoref{sec:foil-model} keeps von-Kármán's original strip geometry (\autoref{fig:elementary-stripe}): straight, vertical strip boundaries, a homogeneous stress state through the strip's thickness at each $x$, and (in \autoref{sec:layer-model}) at best a coarse, discretized approximation of through-thickness variation via a handful of layers. Orowan's 1943 theory~\cite{Orowan1943} - as reconstructed here from Overhagen's account of it~\cite[sec.~4.4.1.2]{Overhagen2018}, the original 1943 paper not being available for direct comparison - instead changes the strip element's own geometry: circular arcs, centred on the roll-gap symmetry line and meeting the roll surfaces at right angles, replace the straight vertical boundaries, with a polar coordinate system on each arc carrying an inner tangential stress $\sigma_{t,i}$, radial stress $\sigma_{r,i}$ and shear stress $\tau_i$. This directly represents the non-uniform, redundant through-thickness deformation Orowan observed rolling plasticine specimens, rather than approximating it through a handful of discrete layers as \autoref{sec:layer-model} does.
+
+    \lstinline{orowan_solver.py} implements \lstinline{OrowanSolver}: the horizontal force balance is von-Kármán's own equation, unchanged from \autoref{eq:karman-elem}'s first line, but the relation between $\sigma_x$ and $\sigma_y$ that closes it is no longer the plain Mises offset - it is Orowan's own closure, correcting for the inhomogeneous deformation the circular-arc geometry captures:
+
+    \begin{gather}
+        \sigma_x = \sigma_y + \frac{2 k_f}{\sqrt3}\left[\omega_O(\alpha) \mp \frac12\left(\frac1\alpha - \frac1{\tan\alpha}\right)\right]
+        \label{eq:orowan-closure}\\
+        \omega_O(\alpha) = \frac1{\sin\alpha}\int_0^\alpha \sqrt{1 - \left(\frac\theta\alpha\right)^2}\cos\theta\,\mathrm d\theta = \frac{\pi J_1(\alpha)}{2\sin\alpha}
+        \label{eq:omega-orowan}
+    \end{gather}
+
+    where $\theta$ is the polar angle within an arc and $J_1$ the order-1 Bessel function of the first kind. The "$-$" sign in \autoref{eq:orowan-closure} applies on the entry (Vorlauf) side, "$+$" on the exit (Nachlauf) side, mirroring the sign convention already used for $\tau_R$ in \autoref{eq:karman-elem}. The inhomogeneity function $\omega_O$ ranges from $1$ (frictionless limit) down to $\pi/4 \approx 0.785$ as $\alpha \to 0$ (full sticking) and depends only weakly on $\alpha$ otherwise~\cite[Abb.~4.4/4]{Overhagen2018} - it is what makes \autoref{eq:orowan-closure} a genuine correction to, rather than a mere re-derivation of, the plain Mises relation $\sigma_x = \sigma_y + 2k_f/\sqrt3$ every other model in this plugin uses. Orowan's general theory pairs \autoref{eq:orowan-closure} with a sliding-friction counterpart (his Gl.~4.4/5) and a friction-ratio parameter $a_O = 2\mu\sigma_N/k_f \in [0,1]$ blending between the two; \lstinline{OrowanSolver} implements only the sticking-friction branch above ($a_O \equiv 1$) applied throughout the contact, since sticking friction (from scale, oxide layers, and high temperature) is the realistic assumption across the whole arc in hot rolling - the regime this model targets. Elastic entry and exit zones bound the sticking-plastic zone on both sides, using the same Hooke's-law construction as \autoref{sec:layer-model}'s $N=1$ case, so that (unlike Orowan's own rigid-plastic 1943 paper) the whole contact is not assumed plastic from first contact.
+
+    Reconstructing \autoref{eq:orowan-closure}--\autoref{eq:omega-orowan} from~\cite{Overhagen2018} required three specific interpretive choices, each checked as far as the available material allows but not verifiable against Orowan's original 1943 paper directly - documented in full in \lstinline{orowan_solver.py}'s module docstring, and summarized here:
+    \begin{itemize}
+        \item Overhagen's own Gl.~4.4/7 prints $\omega_O$'s integration limit as $a_O$ rather than $\alpha$; \autoref{eq:omega-orowan} integrates to $\alpha$ instead, since only that choice reproduces the two values his own Abb.~4.4/4 plots ($\omega_O \to 1$ as $a_O \to 0$; $\omega_O \to \pi/4$ as $a_O \to 1, \alpha \to 0$ - both checked against \autoref{eq:omega-orowan}'s closed form in \lstinline{tests/test_orowan_solve.py}), and the $a_O$-limit version is not even well-defined in general (its square root goes negative once $a_O/\alpha > 1$, the common case at realistic rolling angles and high $a_O$);
+        \item $k_f$ in \autoref{eq:orowan-closure} is $2\times$ the uniaxial flow stress \lstinline{flow_stress_function} returns elsewhere in this plugin (Overhagen's own source equations use a bare $k_f/\sqrt3$ offset, consistent with an older, Tresca-flavoured plane-strain convention for $k_f$ predating this plugin's Mises one) - chosen specifically so \autoref{eq:orowan-closure} reduces to the ordinary Mises relation in the frictionless limit, keeping the elastic-zone yield-onset criterion (still the plain Mises condition) and the plastic-zone closure continuous with each other;
+        \item the entry/exit sign of the $\left(\frac1\alpha - \frac1{\tan\alpha}\right)$ term is a best-effort assignment: Overhagen's source prints it as "$\mp$" without enough surrounding context in the excerpt available to fix which sign belongs to which side independently.
+    \end{itemize}
+    None of these affect $\omega_O$'s qualitative role or \autoref{eq:orowan-closure}'s overall structure; they are exactly the kind of detail worth re-checking against Orowan's 1943 paper directly if it becomes available.
+
+    \lstinline{OrowanSolver} is not wired into the \lstinline{karman_solution} dispatch hook of \autoref{sec:dispatch}: it must be instantiated directly, \lstinline{OrowanSolver(roll_pass=roll_pass)}, for a pass whose profile has already been solved. This is a deliberate scope decision, not an oversight - the model is a genuinely different, orthogonal refinement (curved-strip inhomogeneity) from the axis \autoref{sec:dispatch} already selects along (elastic flattening, then contact-length-to-thickness), it applies only to a single homogeneous cross-section (no layer-count parametrization, unlike \autoref{sec:layer-model}), and it has no thermal coupling (flow stress is evaluated at the incoming profile's own scalar temperature throughout, like \autoref{sec:model-approach} and \autoref{sec:mixed-friction-model}). \autoref{tab:orowan-comparison} summarizes how it relates to the other models in this plugin.
+
+    \begin{table}
+        \centering
+        \caption{Orowan's model compared to the plugin's other solvers.}
+        \label{tab:orowan-comparison}
+        \begin{tabular}{@{}p{0.24\linewidth}p{0.20\linewidth}p{0.19\linewidth}p{0.13\linewidth}p{0.10\linewidth}@{}}
+            \toprule
+            Model & Strip geometry & Friction law & Elastic zones & Thermal \\
+            \midrule
+            \texttt{Karman\-Solver} & straight, homogeneous & pure Coulomb & none & none \\
+            \texttt{Karman\-Mixed\-Friction\-Solver} & straight, homogeneous & Bay/Wanheim mixed & none & none \\
+            \texttt{Layer\-Rolling\-Solver} & straight, $N$ discrete layers & Bay/Wanheim mixed & entry \& exit, per layer & full \\
+            \texttt{Foil\-Rolling\-Solver} & straight, homogeneous, elastic roll contour & Coulomb + optional sticking & entry \& exit & none \\
+            \texttt{Orowan\-Solver} & circular arc, continuous inhomogeneity & sticking only & entry \& exit & none \\
+            \bottomrule
+        \end{tabular}
+    \end{table}
+
+
     \section{Usage instructions}\label{sec:usage-instructions}
     The plugin can be loaded under the name \texttt{pyroll\_karman\_power\_and\_labour}.
 
@@ -137,6 +180,8 @@
 
     Additionally, hooks on \lstinline{RollPass} are defined, which are used in the calculation, as listed in \autoref{tab:hookspecs}.
     The hooks \lstinline{back_tension}, \lstinline{front_tension} and \lstinline{coulomb_friction_coefficient} have to be set and adjusted individually; the foil and layer models additionally need \lstinline{elastic_modulus} and \lstinline{poissons_ratio} set on both \lstinline{RollPass.Roll} and \lstinline{RollPass.InProfile} to be selected at all (see \autoref{sec:dispatch}), and the layer model's thermal coupling needs \lstinline{specific_heat_capacity}, \lstinline{thermal_conductivity} and \lstinline{density} set on both.
+
+    \lstinline{OrowanSolver} (\autoref{sec:orowan-model}) is not reachable through \lstinline{karman_solution}, since it is not part of the automatic dispatch of \autoref{sec:dispatch}; call it directly once the pass has been solved, e.g.\ \lstinline{OrowanSolver(roll_pass=roll_pass)} after \lstinline{PassSequence([roll_pass]).solve(in_profile)}, then read \lstinline{roll_force_per_unit_width}, \lstinline{roll_torque_per_unit_width}, \lstinline{neutral_plane_position} and \lstinline{solution} off the returned instance directly, the same attributes the other four solvers expose.
 
     \begin{table}
         \centering
