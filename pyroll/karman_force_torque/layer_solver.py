@@ -404,17 +404,23 @@ class LayerPassSection:
         offset = 3 + 2 * ns
         for idx, i in enumerate(elastic):
             sigma_x_layers[i] = y[offset + idx]
-        # sigma_y from mean-Mises over the active (plastic) set
+        # sigma_y from mean-Mises over ALL ns layers (elastic and plastic
+        # alike, each with its own current H/T), per the reference's
+        # MisesMean - not just the active (plastic) subset. For ns=1 this
+        # coincides with "active only" (active is always empty or the full
+        # single-layer set there), which is why that case never exposed
+        # this: the mean was silently wrong only once some but not all of
+        # several layers had plastified.
         h = y[3:3 + ns]
-        kfs = []
-        for i in active:
-            t_i = y[3 + ns + i]
+        t_all = y[3 + ns:3 + 2 * ns]
+        kf_all = {}
+        for i in range(ns):
             phi_v_i = _phi_v(self.solver.h0[i], h[i])
-            kfs.append((self.solver.kf(t_i, phi_v_i, self.phi_dot_vm), h[i]))
-        mean_kf = sum(k * hh for k, hh in kfs) / sum(hh for _, hh in kfs)
+            kf_all[i] = self.solver.kf(t_all[i], phi_v_i, self.phi_dot_vm)
+        mean_kf = sum(kf_all[i] * h[i] for i in range(ns)) / sum(h)
         sigma_y = sigma_xm - 2 / np.sqrt(3) * mean_kf
         for i in active:
-            sigma_x_layers[i] = sigma_y + 2 / np.sqrt(3) * kfs[list(active).index(i)][0]
+            sigma_x_layers[i] = sigma_y + 2 / np.sqrt(3) * kf_all[i]
         return sigma_y, sigma_x_layers
 
     # -------------------------------------------------------------- exit side
