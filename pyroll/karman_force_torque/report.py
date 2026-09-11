@@ -5,6 +5,7 @@ from pyroll.core import Unit, PassSequence, Transport, CoolingPipe, RollPass
 import matplotlib.pyplot as plt
 
 from pyroll.karman_force_torque.foil_solver import FoilRollingSolver
+from pyroll.karman_force_torque.layer_solver import LayerRollingSolver
 
 
 @hookimpl(specname="unit_plot")
@@ -76,3 +77,55 @@ def foil_rolling_contour_plot(unit: Unit):
         axl.legend(handles=flattened + rigid, ncols=2, loc="lower center")
 
         return fig
+
+
+def layer_model_per_layer_plots(unit: Unit):
+    """One figure per layer for a thick-slab :class:`.layer_solver.LayerRollingSolver`
+    pass (``layer_count > 1``): each layer's own horizontal stress ``sigma_x``
+    against the shared vertical stress ``sigma_y``, plus that layer's own
+    temperature and equivalent strain - lets sequential (Schmiedekreuz)
+    yielding be inspected layer-by-layer, which the thickness-aggregated
+    plot from :func:`disked_unit_temperature_plot` cannot show. Not wired in
+    as a ``unit_plot`` hookimpl (that contract returns one figure per
+    registered hookimpl, and the number of layers varies per pass) - call
+    directly and handle the returned list of figures.
+    """
+    if not (isinstance(unit, RollPass) and isinstance(unit.karman_solution, LayerRollingSolver)):
+        return []
+
+    solver = unit.karman_solution
+    per_layer = solver.section.solution_dataframe_per_layer()
+    figures = []
+    for i, df in per_layer.items():
+        fig: plt.Figure = plt.figure(figsize=(6, 6))
+        ax: plt.Axes
+        axl: plt.Axes
+        ax, axl = fig.subplots(nrows=2, height_ratios=[1, 0.3])
+        ax.set_title(f"Layer {i} - Stress, Temperature and Strain")
+        ax.grid(lw=0.5)
+
+        sigma_x = ax.plot(df.index, df["sigma_x"], label=r"Horizontal Stress $\sigma_{x,i}$")
+        sigma_y = ax.plot(df.index, df["sigma_y"], label=r"Vertical Stress $\sigma_{y}$ (shared)",
+                           linestyle="--")
+        ax.set_xlabel("x")
+        ax.set_ylabel("Stress")
+        handles = sigma_x + sigma_y
+
+        axr = ax.twinx()
+        temperature = axr.plot(df.index, df["temperature"], label="Temperature $T$", color="red",
+                                linestyle=":")
+        axr.set_ylabel("Temperature")
+        handles = handles + temperature
+
+        axr2 = ax.twinx()
+        axr2.spines["right"].set_position(("axes", 1.2))
+        strain = axr2.plot(df.index, df["equivalent_strain"], label=r"Equivalent Strain $\varphi_{v,i}$",
+                            color="black", linestyle="-.")
+        axr2.set_ylabel(r"Equivalent Strain $\varphi_{v,i}$")
+        handles = handles + strain
+
+        axl.axis("off")
+        axl.legend(handles=handles, ncols=2, loc="center")
+
+        figures.append(fig)
+    return figures

@@ -797,6 +797,55 @@ class LayerPassSection:
             index=pd.Index(x_arr, name="x"),
         )
 
+    def solution_dataframe_per_layer(self):
+        """Per-layer breakdown of the solution, keyed by layer index: each
+        layer's own horizontal stress ``sigma_x`` (the DOF that actually
+        diverges between layers - see module docstring), its own
+        temperature and equivalent strain, plus the shared ``sigma_y``
+        (vertical stress, common to all layers once any has yielded) as a
+        reference line. Lets each layer's approach to, and departure from,
+        the Mises yield surface be inspected individually - the mechanism
+        behind sequential (Schmiedekreuz) yielding - rather than only the
+        thickness-aggregated view in ``solution_dataframe``."""
+        ns = self.ns
+        rows_x = []
+        rows_sigma_x = [[] for _ in range(ns)]
+        rows_sigma_y = []
+        rows_t = [[] for _ in range(ns)]
+        rows_phi_v = [[] for _ in range(ns)]
+        rows_active = [[] for _ in range(ns)]
+        for segs in (self.entry["segments"], self.exit["segments"]):
+            for active, xs, ys in segs:
+                elastic = [i for i in range(ns) if i not in active]
+                for k, x in enumerate(xs):
+                    y = ys[:, k]
+                    sigma_y, sigma_x_layers = self._decompose_state(y, active, elastic)
+                    h = y[3:3 + ns]
+                    t = y[3 + ns:3 + 2 * ns]
+                    rows_x.append(x)
+                    rows_sigma_y.append(sigma_y)
+                    for i in range(ns):
+                        rows_sigma_x[i].append(sigma_x_layers[i])
+                        rows_t[i].append(t[i])
+                        rows_phi_v[i].append(_phi_v(self.solver.h0[i], h[i]))
+                        rows_active[i].append(i in active)
+        order = np.argsort(rows_x)
+        x_arr = np.array(rows_x)[order]
+        sigma_y_arr = np.array(rows_sigma_y)[order]
+        result = {}
+        for i in range(ns):
+            result[i] = pd.DataFrame(
+                {
+                    "sigma_x": np.array(rows_sigma_x[i])[order],
+                    "sigma_y": sigma_y_arr,
+                    "temperature": np.array(rows_t[i])[order],
+                    "equivalent_strain": np.array(rows_phi_v[i])[order],
+                    "active": np.array(rows_active[i])[order],
+                },
+                index=pd.Index(x_arr, name="x"),
+            )
+        return result
+
 
 def _phi_v(h0, h):
     return 2 / np.sqrt(3) * np.log(h0 / h)
