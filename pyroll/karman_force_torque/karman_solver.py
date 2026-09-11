@@ -96,7 +96,8 @@ class KarmanSolver:
             stepwise_solution_storage[position] = (
                 {"horizontal_stress": horizontal_stress, "vertical_stress": vertical_stress,
                  "shear_stress": shear_stress,
-                 "normal_pressure": normal_pressure, "flow_stress": flow_stress})
+                 "normal_pressure": normal_pressure, "flow_stress": flow_stress,
+                 "equivalent_strain": equivalent_strain})
 
             horizontal_stress_change = - (
                     horizontal_stress * height_derivate + 2 * shear_stress - 2 * normal_pressure * np.tan(

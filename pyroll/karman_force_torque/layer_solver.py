@@ -537,6 +537,15 @@ class LayerPassSection:
         sigma_y, _ = self._decompose_state(y, active, elastic)
         return sigma_y
 
+    def _mean_phi_v_of_state(self, y):
+        """Thickness-weighted mean equivalent strain across all ns layers,
+        for reporting alongside the stress curves (mirrors exit_temperature's
+        weighting)."""
+        ns = self.ns
+        h = y[3:3 + ns]
+        phi_v = _phi_v(self.solver.h0, h)
+        return float(np.average(phi_v, weights=h))
+
     def _reshape_state_for_active(self, y, old_active, new_active):
         """Re-express a state vector at a zone boundary where the active
         (plastic) layer set changes, keeping the shared padded layout
@@ -694,7 +703,7 @@ class LayerPassSection:
         return dh
 
     def solution_dataframe(self):
-        rows_x, rows_p, rows_tau = [], [], []
+        rows_x, rows_p, rows_tau, rows_strain = [], [], [], []
         for segs, label in ((self.entry["segments"], 1), (self.exit["segments"], -1)):
             for active, xs, ys in segs:
                 for k, x in enumerate(xs):
@@ -702,15 +711,18 @@ class LayerPassSection:
                     rows_x.append(x)
                     rows_p.append(-sigma_y)
                     rows_tau.append(0.0)
+                    rows_strain.append(self._mean_phi_v_of_state(ys[:, k]))
         order = np.argsort(rows_x)
         x_arr = np.array(rows_x)[order]
         p_arr = np.array(rows_p)[order]
         tau_arr = np.array(rows_tau)[order]
+        strain_arr = np.array(rows_strain)[order]
         return pd.DataFrame(
             {
                 "vertical_stress": -p_arr,
                 "normal_pressure": p_arr,
                 "shear_stress": tau_arr,
+                "equivalent_strain": strain_arr,
             },
             index=pd.Index(x_arr, name="x"),
         )

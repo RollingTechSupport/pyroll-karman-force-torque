@@ -498,13 +498,30 @@ class FoilRollingSolver:
         )
         vertical_stress = -pressure
 
+        h_of_x = t_of_x(xs) / self.t_scale
+        equivalent_strain = 2 / np.sqrt(3) * np.log(self.h0 / h_of_x)
+
         self.solution = pd.DataFrame(
             {
                 "vertical_stress": vertical_stress,
                 "normal_pressure": pressure,
                 "shear_stress": shear,
+                "equivalent_strain": equivalent_strain,
             },
             index=pd.Index(x_physical, name="x"),
+        )
+
+        # The converged, generally non-circular roll-gap contour against the
+        # rigid/circular baseline it started from - the headline result of
+        # this solver's outer elastic-flattening iteration (see module
+        # docstring), so worth exposing for reporting alongside the stress
+        # and strain profiles above.
+        self.roll_contour = pd.DataFrame(
+            {
+                "gap_height": self.current_shape / self.t_scale,
+                "rigid_gap_height": self.base_shape / self.t_scale,
+            },
+            index=pd.Index(self.grid_x / self.x_scale, name="x"),
         )
 
         self.roll_force_per_unit_width = float(trapezoid(pressure, x_physical))
