@@ -29,29 +29,29 @@ use Bay & Wanheim's smoothed mixed Coulomb/sticking friction law throughout
   zum Kaltwalzen von Metallfolien mit keramischen Arbeitswalzen auf
   Mehrwalzengerüsten" (2013).
 
-The dispatch order is: Hitchcock's flattened-radius ratio `r'/r` decides
-foil vs. not (`RollPass.foil_rolling_hitchcock_limit`, default `2.0`, via
-`RollPass.foil_rolling_condition`); otherwise the classical contact-length /
-mean-thickness ratio `Ld/Hm` decides thick (`LayerRollingSolver`, multiple
-layers) vs. medium (`KarmanMixedFrictionSolver`) (`RollPass.layer_model_ld_hm_limit`,
-default `1.0`, via `RollPass.thick_slab_condition`; layer count via
-`RollPass.layer_model_layer_count`, default `5`). All of these are
+Dispatch uses a single quantity, the classical contact-length / mean-thickness
+ratio `Ld/Hm` (`contact_length_over_mean_thickness` in `condition.py`) - a
+cheap, purely geometric calculation needing no solver to be run first:
+below `RollPass.layer_model_ld_hm_limit` (default `1.0`, via
+`RollPass.thick_slab_condition`) selects `LayerRollingSolver` (multiple
+layers, layer count via `RollPass.layer_model_layer_count`, default `5`);
+above `RollPass.foil_rolling_ld_hm_limit` (default `10.0`, via
+`RollPass.foil_rolling_condition`) selects `FoilRollingSolver`; in between
+selects `KarmanMixedFrictionSolver` for medium passes. Both limits are
 overridable hooks, including forcing a specific model unconditionally.
 `elastic_modulus`/`poissons_ratio` on both the roll and the profile are
-required for every pass (needed for the Hitchcock-ratio/Ld-Hm checks
-themselves, and for every solver's own elastic zones) - there is no
-fallback for passes that omit them, they simply error. The layer model's
-thermal coupling additionally needs `specific_heat_capacity`/
-`thermal_conductivity`/`density` on both.
+required for every pass (needed for the Ld/Hm checks themselves, and for
+every solver's own elastic zones) - there is no fallback for passes that
+omit them, they simply error. The layer model's thermal coupling
+additionally needs `specific_heat_capacity`/`thermal_conductivity`/`density`
+on both.
 
 Roll flattening itself is out of this plugin's scope: all three solvers
 just read `Roll.working_radius` once, the same hook `pyroll-core` already
 provides, rather than deriving or iterating on a flattened radius
 themselves. A separate plugin hooking `Roll.working_radius` (e.g. with
 Hitchcock's relation) is picked up transparently by whichever solver
-runs; this plugin's own Hitchcock ratio (`hitchcock_radius_ratio` in
-`condition.py`) is used purely to classify a pass for dispatch
-(`foil_rolling_condition`), never fed back into a calculation.
+runs.
 
 For the docs, see [here](docs/docs.pdf) (source in [`docs/docs.tex`](docs/docs.tex)).
 

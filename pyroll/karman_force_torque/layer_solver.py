@@ -27,9 +27,10 @@ Roll flattening is out of scope here, same as for the other solvers in this
 plugin: this solver reads ``Roll.working_radius``
 once and does not re-derive or iterate on it. A separate plugin providing a
 Hitchcock (or other) flattened radius via that hook is picked up
-transparently; this plugin's own ``hitchcock_radius_ratio`` (see
+transparently; this plugin's own ``contact_length_over_mean_thickness`` (see
 ``condition.py``) is only ever used to *classify* a pass for dispatch
-(``foil_rolling_condition``), never fed back into a calculation.
+(``foil_rolling_condition``, ``thick_slab_condition``), never fed back into
+a calculation.
 
 All quantities are SI, matching ``pyroll-core`` conventions. Layers are
 indexed ``0..layer_count-1`` from the (arbitrarily chosen) "top" roll to

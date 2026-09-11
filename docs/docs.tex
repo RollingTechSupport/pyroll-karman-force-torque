@@ -99,7 +99,7 @@
 
     where $m$ is the sticking friction coefficient (\lstinline{friction_stiction_coefficient}), $\mathrm{sign}$ the (regularized) direction of relative sliding, and $c$ a smoothing parameter (\lstinline{pressure_smoothness}) controlling how sharply the transition $\Phi$ switches from Coulomb ($\Phi=0$) to sticking ($\Phi=1$) around the critical pressure $p_{N,\mathrm{crit}}$.
 
-    Roll flattening is deliberately out of scope here, as it is for the other solvers in this plugin: all three simply read \lstinline{Roll.working_radius} once rather than deriving a flattened radius themselves. A separate plugin providing a Hitchcock~\cite{Hitchcock1935} (or other) flattened radius via that hook is therefore picked up transparently by every solver in this plugin, with no special-casing needed; the classical linear Hitchcock relation implemented in \lstinline{condition.py} (\lstinline{hitchcock_radius_ratio}) exists solely to \emph{classify} a pass for dispatch (\autoref{sec:dispatch}), and is never fed back into a calculation.
+    Roll flattening is deliberately out of scope here, as it is for the other solvers in this plugin: all three simply read \lstinline{Roll.working_radius} once rather than deriving a flattened radius themselves. A separate plugin providing a Hitchcock~\cite{Hitchcock1935} (or other) flattened radius via that hook is therefore picked up transparently by every solver in this plugin, with no special-casing needed; this plugin's own dispatch criterion, the contact-length-to-mean-thickness ratio implemented in \lstinline{condition.py} (\lstinline{contact_length_over_mean_thickness}), exists solely to \emph{classify} a pass for dispatch (\autoref{sec:dispatch}), and is never fed back into a calculation.
 
     Because each pass only sees the incoming profile's own scalar strain and temperature (\lstinline{pyroll-core} has no native concept of a through-thickness state carried from one pass to the next), all layers start uniform; the elastic entry zone therefore has no mechanism to break symmetry between layers (matching the reference implementation, which defines but never uses a redundant-shear correction after Ekelund~\cite{Ekelund1933}). Layers still diverge from the first plastification onward, since only the outermost layers feel roll-contact friction directly while inner layers feel the weaker inner-friction law, and the resulting temperature and flow-stress differences compound through the rest of the pass.
 
@@ -113,10 +113,15 @@
 
     \lstinline{roll_pass.py} wires the three solvers together behind a single hook, \lstinline{karman_solution}, so that \lstinline{roll_force}, \lstinline{Roll.roll_torque}, \lstinline{Roll.neutral_point} and the profile velocity hooks work unchanged regardless of which solver actually ran:
 
+    A single quantity drives the whole decision: the classical contact-length-to-mean-thickness ratio $L_d/H_m$ (\lstinline{contact_length_over_mean_thickness} in \lstinline{condition.py}), a cheap, purely geometric calculation needing no solver to be run first.
+
     \begin{enumerate}
-        \item the Hitchcock flattened-to-nominal radius ratio $r'/r$ is evaluated (Mauk and Overhagen~\cite{MaukOverhagen2013} give $r'/r \geq 2$ as the point where a circular roll-gap assumption is no longer trustworthy), using \lstinline{KarmanMixedFrictionSolver}'s own force estimate for the pass; if exceeded, the foil-rolling model of \autoref{sec:foil-model} is used;
-        \item otherwise, the classical contact-length-to-mean-thickness ratio $L_d/H_m$ decides between the layer model's thick-slab configuration (\autoref{sec:layer-model}) and the mixed-friction model (\autoref{sec:mixed-friction-model}) for medium passes.
+        \item if $L_d/H_m$ is below \lstinline{layer_model_ld_hm_limit} (default $1.0$), through-thickness deformation is inhomogeneous enough that the layer model of \autoref{sec:layer-model} is used;
+        \item if $L_d/H_m$ is above \lstinline{foil_rolling_ld_hm_limit} (default $10.0$), the pass is thin enough relative to the contact length that elastic roll flattening can no longer be neglected, and the foil-rolling model of \autoref{sec:foil-model} is used;
+        \item otherwise, the mixed-friction model (\autoref{sec:mixed-friction-model}) is used for medium passes.
     \end{enumerate}
+
+    Earlier versions of this plugin used the Hitchcock flattened-to-nominal radius ratio $r'/r$ (Mauk and Overhagen~\cite{MaukOverhagen2013} give $r'/r \geq 2$ as the point where a circular roll-gap assumption is no longer trustworthy) for the foil decision instead, requiring an extra \lstinline{KarmanMixedFrictionSolver} solve purely to obtain a force estimate for it; using $L_d/H_m$ for all three decisions removes that extra solve and keeps the whole dispatch to one consistent, purely geometric criterion.
 
     Both limits are themselves hooks (\autoref{tab:hookspecs}) and can be overridden per pass, including forcing a particular model unconditionally. Since all three models are elastic-plastic, the roll and profile elastic properties (\lstinline{elastic_modulus}, \lstinline{poissons_ratio}) must be set for every pass - there is no rigid-plastic fallback for passes that omit them; a pass without them simply fails to solve.
 
@@ -133,22 +138,22 @@
             \texttt{Karman\-Mixed\-Friction\-Solver} &
             elastic-plastic, homogeneous cross-section &
             Bay/Wanheim mixed Coulomb/sticking &
-            medium gauge: $r'/r < 2$ (default) and $L_d/H_m \geq 1$ (default) - the plugin's default once neither condition below triggers \\
+            medium gauge: $1 \leq L_d/H_m \leq 10$ (defaults) - the plugin's default once neither condition below triggers \\
             \addlinespace
             \texttt{Layer\-Rolling\-Solver} &
             elastic-plastic, $N$ through-thickness layers, full thermal coupling &
             Bay/Wanheim mixed (roll contact \& inter-layer) &
-            thick slabs: $L_d/H_m < 1$ (default), i.e.\ contact length small relative to mean thickness, and $r'/r < 2$ \\
+            thick slabs: $L_d/H_m < 1$ (default), i.e.\ contact length small relative to mean thickness \\
             \addlinespace
             \texttt{Foil\-Rolling\-Solver} &
             elastic-plastic, homogeneous cross-section, elastic (non-circular) roll-gap contour &
             Coulomb with optional sticking zone &
-            foil rolling: $r'/r \geq 2$ (default). Governed by $r'/r$, not gauge alone - force and roll stiffness matter too, so no fixed absolute thickness applies (our own 0.5\,mm-to-0.2\,mm steel-foil case needed a small roll radius and tuned friction/tension to actually reach $r'/r \geq 2$; industrial foils are typically well under 0.1\,mm) \\
+            foil rolling: $L_d/H_m > 10$ (default), i.e.\ contact length large relative to mean thickness - our own 0.5\,mm-to-0.2\,mm steel-foil case reaches $L_d/H_m$ in the tens; industrial foils are typically well under 0.1\,mm and correspondingly further into this regime \\
             \addlinespace
             \texttt{Orowan\-Solver} &
             elastic-plastic, single homogeneous cross-section, circular-arc inhomogeneity correction &
             Bay/Wanheim mixed &
-            not gated by $L_d/H_m$ or $r'/r$ - always selected explicitly (\autoref{sec:usage-instructions}). A hot-rolling alternative to \texttt{Karman\-Mixed\-Friction\-Solver}/\texttt{Layer\-Rolling\-Solver}, typically overlapping the medium-to-thick gauge range \\
+            not gated by $L_d/H_m$ - always selected explicitly (\autoref{sec:usage-instructions}). A hot-rolling alternative to \texttt{Karman\-Mixed\-Friction\-Solver}/\texttt{Layer\-Rolling\-Solver}, typically overlapping the medium-to-thick gauge range \\
             \bottomrule
         \end{tabular}
     \end{table}
@@ -205,7 +210,7 @@
 
     \section{Comparison of the models}\label{sec:comparison}
 
-    Because \lstinline{KarmanMixedFrictionSolver}, \lstinline{LayerRollingSolver} and \lstinline{OrowanSolver} all integrate the same equilibrium equation (\autoref{eq:karman-elem}) with the same mixed friction law (\autoref{eq:mixed-friction}), differing only in their $\sigma_x$/$\sigma_y$ closure and (for the layer model) through-thickness resolution, they can be run side by side on the same pass and compared directly - unlike \lstinline{FoilRollingSolver}, whose elastic roll-gap contour only differs meaningfully from a rigid one once $r'/r \geq 2$ (\autoref{sec:dispatch}), well outside the gauge range the other three are meant for.
+    Because \lstinline{KarmanMixedFrictionSolver}, \lstinline{LayerRollingSolver} and \lstinline{OrowanSolver} all integrate the same equilibrium equation (\autoref{eq:karman-elem}) with the same mixed friction law (\autoref{eq:mixed-friction}), differing only in their $\sigma_x$/$\sigma_y$ closure and (for the layer model) through-thickness resolution, they can be run side by side on the same pass and compared directly - unlike \lstinline{FoilRollingSolver}, whose elastic roll-gap contour only differs meaningfully from a rigid one once $L_d/H_m > 10$ (\autoref{sec:dispatch}), well outside the gauge range the other three are meant for.
 
     \autoref{tab:model-comparison} and \autoref{fig:model-comparison} compare all four on the same representative hot-rolling pass ($h_0=\SI{15}{mm}$, gap \SI{12}{mm}, work-roll radius \SI{160}{mm}, $\mu=0.35$, constant $k_f=\SI{100}{MPa}$, no tension) - the same pass used in this plugin's own test suite. All four agree on roll force to within about $10\%$ and on the friction-hill shape (\autoref{fig:model-comparison}): \lstinline{OrowanSolver} predicts a somewhat lower peak pressure and force than \lstinline{KarmanMixedFrictionSolver}, since its inhomogeneity function $\omega_O$ (\autoref{eq:omega-orowan}) is $\leq 1$ and so only ever reduces the Mises offset relative to the plain closure; \lstinline{LayerRollingSolver} with a single layer ($N=1$) falls in between, close to but not identical to \lstinline{KarmanMixedFrictionSolver}, since it is a materially different implementation (thermally coupled, its own elastic-plastic constitutive formulation) that happens to collapse to the same physical limit rather than sharing code with it (\autoref{sec:mixed-friction-model}); and \lstinline{LayerRollingSolver} with five layers ($N=5$) sits close to its own $N=1$ result, as expected since this particular pass is not actually in the thick-slab regime ($L_d/H_m$ comfortably above the default limit of $1$) - the layer count only matters once through-thickness deformation is genuinely inhomogeneous.
 
@@ -257,7 +262,7 @@
             \texttt{front\_tension} & Front tension of the roll pass $\sigma_{x,1}$ \\
             \texttt{karman\_solution} & Solver object (of one of the three models) with solution values as attributes \\
             \texttt{foil\_rolling\_condition} & Whether the foil-rolling model (\autoref{sec:foil-model}) is used \\
-            \texttt{foil\_rolling\_hitchcock\_limit} & Hitchcock ratio $r'/r$ above which the foil model is used (default 2.0) \\
+            \texttt{foil\_rolling\_ld\_hm\_limit} & $L_d/H_m$ ratio above which the foil model is used (default 10.0) \\
             \texttt{thick\_slab\_condition} & Whether the multi-layer, thick-slab configuration (\autoref{sec:layer-model}) is used instead of \texttt{KarmanMixedFrictionSolver} (\autoref{sec:mixed-friction-model}) \\
             \texttt{layer\_model\_ld\_hm\_limit} & $L_d/H_m$ ratio below which the multi-layer configuration is used (default 1.0) \\
             \texttt{layer\_model\_layer\_count} & Number of through-thickness layers on the thick-slab path (default 5) \\

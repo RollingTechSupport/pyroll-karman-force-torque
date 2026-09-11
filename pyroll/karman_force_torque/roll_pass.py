@@ -1,5 +1,5 @@
 from pyroll.core import RollPass, Hook
-from pyroll.karman_force_torque.condition import contact_length_over_mean_thickness, hitchcock_radius_ratio
+from pyroll.karman_force_torque.condition import contact_length_over_mean_thickness
 from pyroll.karman_force_torque.foil_solver import FoilRollingSolver
 from pyroll.karman_force_torque.layer_solver import LayerRollingSolver
 from pyroll.karman_force_torque.karman_mixed_friction_solver import KarmanMixedFrictionSolver
@@ -13,14 +13,15 @@ Wanheim mixed Coulomb/sticking friction, so elastic properties
 every pass - there is no rigid-plastic fallback."""
 
 RollPass.foil_rolling_condition = Hook[bool]()
-"""Whether the pass is in the foil-rolling regime, i.e. elastic roll flattening
-is severe enough that the single-layer von-Karman solution is no longer valid
-and the full elastic foil-rolling model should be used instead."""
+"""Whether the pass is in the foil-rolling regime, i.e. the contact-length /
+mean-thickness ratio (Ld/Hm) is large enough that the single-layer von-Karman
+solution is no longer valid and the full elastic foil-rolling model should be
+used instead."""
 
-RollPass.foil_rolling_hitchcock_limit = Hook[float]()
-"""Hitchcock flattened-to-nominal radius ratio (r'/r) above which the
-single-layer model is considered invalid (Mauk & Overhagen 2013, p. 12:
-r'/r >= 2)."""
+RollPass.foil_rolling_ld_hm_limit = Hook[float]()
+"""Contact-length / mean-thickness ratio (Ld/Hm) above which the pass is
+considered thin enough to need the full elastic foil-rolling model (default
+10.0)."""
 
 RollPass.thick_slab_condition = Hook[bool]()
 """Whether the pass is thick enough that through-thickness deformation can no
@@ -47,9 +48,9 @@ RollPass.roll_heat_transfer_coefficient = Hook[float]()
 LayerRollingSolver's thermal coupling. Default 6000 W/(m^2 K)."""
 
 
-@RollPass.foil_rolling_hitchcock_limit
-def foil_rolling_hitchcock_limit(self: RollPass):
-    return 2.0
+@RollPass.foil_rolling_ld_hm_limit
+def foil_rolling_ld_hm_limit(self: RollPass):
+    return 10.0
 
 
 @RollPass.layer_model_ld_hm_limit
@@ -74,9 +75,8 @@ def roll_heat_transfer_coefficient(self: RollPass):
 
 @RollPass.foil_rolling_condition
 def foil_rolling_condition(self: RollPass):
-    flat_solution = KarmanMixedFrictionSolver(roll_pass=self)
-    ratio = hitchcock_radius_ratio(self, flat_solution.roll_force_per_unit_width)
-    return ratio >= self.foil_rolling_hitchcock_limit
+    ratio = contact_length_over_mean_thickness(self, self.roll.working_radius)
+    return ratio > self.foil_rolling_ld_hm_limit
 
 
 @RollPass.thick_slab_condition
