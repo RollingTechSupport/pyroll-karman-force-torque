@@ -60,18 +60,31 @@ def foil_rolling_contour_plot(unit: Unit):
     if isinstance(unit, RollPass) and isinstance(unit.karman_solution, FoilRollingSolver):
         contour = unit.karman_solution.roll_contour
 
-        fig: plt.Figure = plt.figure(figsize=(6, 6))
+        fig: plt.Figure = plt.figure(figsize=(6, 7))
         ax: plt.Axes
+        axd: plt.Axes
         axl: plt.Axes
-        ax, axl = fig.subplots(nrows=2, height_ratios=[1, 0.3])
+        ax, axd, axl = fig.subplots(nrows=3, height_ratios=[1, 0.6, 0.3])
         ax.set_title("Foil Rolling - Elastically Flattened Roll-Gap Contour")
         ax.grid(lw=0.5)
 
         flattened = ax.plot(contour.index, contour["gap_height"], label="Flattened gap height")
         rigid = ax.plot(contour.index, contour["rigid_gap_height"], label="Rigid (circular) gap height",
                          linestyle="--")
-        ax.set_xlabel("x")
         ax.set_ylabel("Gap height")
+
+        # The two curves above can look nearly identical at typical foil
+        # r'/r ratios even though the flattening is real and load-bearing -
+        # plot their difference on its own axis (a different, much smaller
+        # scale) so a small but genuine effect stays visible rather than
+        # disappearing into line width.
+        deviation = (contour["gap_height"] - contour["rigid_gap_height"])
+        axd.grid(lw=0.5)
+        axd.axhline(0.0, color="black", lw=0.75)
+        axd.plot(contour.index, deviation, color="tab:red")
+        axd.set_xlabel("x")
+        axd.set_ylabel("Flattened - rigid")
+        axd.fill_between(contour.index, deviation, 0.0, color="tab:red", alpha=0.15)
 
         axl.axis("off")
         axl.legend(handles=flattened + rigid, ncols=2, loc="lower center")
