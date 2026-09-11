@@ -86,48 +86,27 @@ def _build_hot_pass(mu):
     return roll_pass
 
 
-def test_orowan_sticking_default_is_unaffected_by_mixed_friction_model():
-    """Adding friction_model="mixed" must not change a single line of
-    behaviour for the (default) friction_model="sticking" path - checked
-    by comparing bit-for-bit against explicitly requesting "sticking"."""
-    roll_pass = _build_hot_pass(mu=0.35)
-    default = OrowanSolver(roll_pass=roll_pass)
-    explicit = OrowanSolver(roll_pass=roll_pass, friction_model="sticking")
-    assert default.roll_force_per_unit_width == explicit.roll_force_per_unit_width
-    assert default.roll_torque_per_unit_width == explicit.roll_torque_per_unit_width
-
-
-def test_orowan_solver_rejects_unknown_friction_model():
-    roll_pass = _build_hot_pass(mu=0.35)
-    with pytest.raises(ValueError):
-        OrowanSolver(roll_pass=roll_pass, friction_model="bogus")
-
-
 @pytest.mark.slow
-def test_orowan_mixed_friction_converges_with_sane_outputs():
-    """friction_model="mixed" layers Bay & Wanheim's mixed Coulomb/sticking
-    law (the same law KarmanMixedFrictionSolver/LayerRollingSolver use) on
-    top of Orowan's inhomogeneity correction, instead of assuming sticking
-    throughout. For a friction coefficient below the sticking threshold,
-    this should predict a *lower* peak pressure and roll force than
-    assuming full sticking everywhere (less severe friction assumption),
-    while still forming a proper friction hill (positive throughout, single
-    interior peak, elastic zones now also carrying nonzero friction - see
-    module docstring on why "sticking" mode's zero-friction elastic zone
-    would blow up if used with sticking friction from x0)."""
-    roll_pass = _build_hot_pass(mu=0.35)
+def test_orowan_solver_lower_friction_reduces_force():
+    """OrowanSolver always uses Bay & Wanheim's mixed Coulomb/sticking law
+    (the same law KarmanMixedFrictionSolver/LayerRollingSolver use) layered
+    on top of Orowan's inhomogeneity correction. A lower Coulomb friction
+    coefficient should predict a *lower* peak pressure and roll force than
+    a higher one (less severe friction assumption), while both still form a
+    proper friction hill (positive throughout, single interior peak,
+    elastic zones carrying nonzero friction since Bay & Wanheim's law is
+    well-behaved as pressure -> 0)."""
+    low_friction = OrowanSolver(roll_pass=_build_hot_pass(mu=0.15))
+    high_friction = OrowanSolver(roll_pass=_build_hot_pass(mu=0.35))
 
-    sticking = OrowanSolver(roll_pass=roll_pass, friction_model="sticking")
-    mixed = OrowanSolver(roll_pass=roll_pass, friction_model="mixed")
+    for solver in (low_friction, high_friction):
+        assert solver.roll_force_per_unit_width > 0
+        assert solver.roll_torque_per_unit_width > 0
+        assert solver.entry_position < solver.neutral_plane_position < solver.exit_position
+        pressure = solver.solution["normal_pressure"]
+        assert (pressure >= -1.0).all()
+        assert pressure.max() > pressure.iloc[0]
+        assert pressure.max() > pressure.iloc[-1]
 
-    assert mixed.roll_force_per_unit_width > 0
-    assert mixed.roll_torque_per_unit_width > 0
-    assert mixed.entry_position < mixed.neutral_plane_position < mixed.exit_position
-
-    pressure = mixed.solution["normal_pressure"]
-    assert (pressure >= -1.0).all()
-    assert pressure.max() > pressure.iloc[0]
-    assert pressure.max() > pressure.iloc[-1]
-
-    assert mixed.roll_force_per_unit_width < sticking.roll_force_per_unit_width
-    assert pressure.max() < sticking.solution["normal_pressure"].max()
+    assert low_friction.roll_force_per_unit_width < high_friction.roll_force_per_unit_width
+    assert low_friction.solution["normal_pressure"].max() < high_friction.solution["normal_pressure"].max()

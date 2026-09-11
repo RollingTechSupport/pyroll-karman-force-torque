@@ -7,8 +7,9 @@ to a single, layer-count-parametrized solver: ``layer_count=1`` is the
 case where surface and core develop meaningfully different flow stress
 through the pass.
 
-Unlike :class:`.karman_solver.KarmanSolver` (no elastic zones, pure Coulomb
-friction, single homogeneous slab, no thermal coupling), this solver models:
+Unlike :class:`.karman_mixed_friction_solver.KarmanMixedFrictionSolver`
+(elastic zones and mixed friction, but a single homogeneous slab with no
+thermal coupling), this solver additionally models:
 
 - an elastic entry zone (no layer has yielded yet, the whole stack behaves
   as one elastic body under uniform incoming layers - see the module-level
@@ -22,8 +23,8 @@ friction, single homogeneous slab, no thermal coupling), this solver models:
   rolls, deformation heat, friction heat, convective transport), coupled
   back into each layer's own flow stress.
 
-Roll flattening is out of scope here, same as for KarmanSolver and
-FoilRollingSolver's own base radius: this solver reads ``Roll.working_radius``
+Roll flattening is out of scope here, same as for the other solvers in this
+plugin: this solver reads ``Roll.working_radius``
 once and does not re-derive or iterate on it. A separate plugin providing a
 Hitchcock (or other) flattened radius via that hook is picked up
 transparently; this plugin's own ``hitchcock_radius_ratio`` (see
@@ -84,8 +85,8 @@ def bay_wanheim_coulomb_from_stiction(stiction_coefficient: float) -> float:
 class LayerRollingSolver:
     """Elastic-plastic, thermally-coupled layer model of a roll pass.
 
-    Provides the same public attributes as :class:`.karman_solver.KarmanSolver`
-    / :class:`.foil_solver.FoilRollingSolver` (``roll_force_per_unit_width``,
+    Provides the same public attributes as the other solvers in this plugin
+    (``roll_force_per_unit_width``,
     ``roll_torque_per_unit_width``, ``entry_velocity``, ``exit_velocity``,
     ``neutral_plane_position``, ``solution``) plus ``exit_temperature``
     (thickness-weighted mean across layers).
@@ -214,8 +215,8 @@ class LayerRollingSolver:
         # Roll flattening (if any) is out of scope for this solver: it is
         # the concern of whatever hookimpl provides Roll.working_radius (a
         # separate Hitchcock-flattening plugin, say) - this solver just
-        # reads that hook's result once, like KarmanSolver and
-        # FoilRollingSolver already do, rather than re-deriving a flattened
+        # reads that hook's result once, like the other solvers in this
+        # plugin already do, rather than re-deriving a flattened
         # radius itself and feeding it back into its own calculation.
         self.working_radius = self.nominal_radius
         self.section = LayerPassSection(self, self.working_radius)

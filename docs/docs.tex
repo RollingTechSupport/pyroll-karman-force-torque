@@ -21,19 +21,18 @@
     Since von-Karman originally developed the strip or slap theory for flat rolling, the grooved pass is not considered directly.
     The solution is therefore derived for an equivalent flat pass, which makes the plugin's accuracy heavily depended on the equivalent flat pass plugins.
 
-    The plugin provides four solvers, covering the full range from thick slabs to metal foils, and selects between them automatically for each roll pass:
+    The plugin provides three solvers, covering the full range from thick slabs to metal foils, and selects between them automatically for each roll pass. All three are elastic-plastic (Hooke's-law entry and exit zones bound the plastic zone, rather than assuming the whole contact is plastic from first contact) and use Bay and Wanheim's smoothed mixed Coulomb/sticking friction law throughout - there is no rigid-plastic or pure-Coulomb model in this plugin:
 
     \begin{itemize}
-        \item a rigid-roll solver based directly on von-Kármán's differential equation (\autoref{sec:model-approach}), valid whenever elastic effects are negligible;
-        \item a rigid-plastic solver with a mixed Coulomb/sticking friction law (\autoref{sec:mixed-friction-model}), used for medium passes, that keeps von-Kármán's structure but replaces pure Coulomb friction with Bay and Wanheim's smoothed mixed law;
-        \item an elastic-plastic layer model (\autoref{sec:layer-model}), used for thick passes, that adds elastic entry/exit zones, the same mixed friction law, through-thickness resolution into multiple layers, and full thermal coupling;
+        \item a mixed-friction solver for medium passes (\autoref{sec:mixed-friction-model}), that keeps von-Kármán's equilibrium equation and closes it with the plain Mises relation;
+        \item an elastic-plastic layer model (\autoref{sec:layer-model}), used for thick passes, that adds through-thickness resolution into multiple layers and full thermal coupling on top of the same construction;
         \item a full elastic-contour foil-rolling model (\autoref{sec:foil-model}), used once elastic roll flattening becomes so severe that a circular roll-gap assumption is no longer valid.
     \end{itemize}
 
-    \autoref{sec:dispatch} explains the criteria used to select between the four, and \autoref{sec:usage-instructions} lists the hooks the plugin defines. A fifth model, Orowan's own 1943 hot-rolling theory (\autoref{sec:orowan-model}), is also implemented but deliberately kept outside this automatic selection - \autoref{sec:orowan-model} explains why and how it is used instead.
+    \autoref{sec:dispatch} explains the criteria used to select between the three, and \autoref{sec:usage-instructions} lists the hooks the plugin defines. A fourth model, Orowan's own 1943 hot-rolling theory (\autoref{sec:orowan-model}), is also implemented but deliberately kept outside this automatic selection - \autoref{sec:orowan-model} explains why and how it is used instead.
 
 
-    \section{Rigid-roll model (von-Kármán)}\label{sec:model-approach}
+    \section{Von-Kármán's equilibrium equation}\label{sec:model-approach}
 
     The current model is based on the classic elementary theory of plasticity, which is a well known approach of modelling the stress distributions in flat rolling.
     The elementary theory of plasticity for flat rolling is also known as strip or slap theory, because the roll gap is divided in rolling direction in infinitesimal narrow strips, as shown in \autoref{fig:elementary-stripe}, on which the force balance is built.
@@ -60,29 +59,23 @@
     \end{equation}
 
     The model needs additional approaches for the yield stress, and the friction between rolls and workpiece.
-    The shear stress resulting from friction between the material and the roll surface is model by Coulomb's friction law.
-    Since normally this model is used for cold rolling with lubricates, the friction coefficient $\mu$ has to be sufficiently high.
     The force balance at the stripe element leads to the well known Karmàn differential equation~\cite{Karman1925, Alexander1972} as shown in \autoref{eq:karman-elem}, which is an ordinary differential equation for the horizontal stress $\sigma_x$ in $x$ and can be solved easily by numerical methods.
-    A suitable yield criterion gives the connection between $\sigma_x$ and $\sigma_y$.
-    In this approach the yield criterion according to von-Mises was chosen~\cite{Mises1913, Mises1928}.
+    A suitable yield criterion gives the connection between $\sigma_x$ and $\sigma_y$; every model in this plugin (\autoref{sec:mixed-friction-model}--\autoref{sec:orowan-model}) integrates \autoref{eq:karman-elem} unchanged, differing only in the friction law closing $\tau_R$ (below), the algebraic relation closing $\sigma_x$ and $\sigma_y$, and whether the strip is treated as one homogeneous cross-section or several through-thickness layers.
 
     \begin{gather}
-        0 = \sigma_x, \frac{\mathrm{d}h}{\mathrm{d}x} + h\, \frac{\mathrm{d}\sigma_x}{\mathrm{d}x} + 2 \tau_R - 2 p_N \tan(\alpha)\\
-        p_N = -\sigma_y - \tau_R \tan(\alpha)\\
-        \tau = \mu p_N
+        0 = \sigma_x\, \frac{\mathrm{d}h}{\mathrm{d}x} + h\, \frac{\mathrm{d}\sigma_x}{\mathrm{d}x} + 2 \tau_R - 2 p_N \tan(\alpha)\\
+        p_N = -\sigma_y - \tau_R \tan(\alpha)
         \label{eq:karman-elem}
     \end{gather}
 
-    This rigid-roll solution never resolves elastic zones (the whole contact is assumed plastic from the first point of contact) and does not couple to temperature; it is implemented in \lstinline{karman_solver.py} as \lstinline{KarmanSolver}.
+    Every model in this plugin bounds the plastic zone integrating \autoref{eq:karman-elem} with Hooke's-law elastic entry and exit zones (rather than assuming the whole contact is plastic from the first point of contact), and closes the friction shear stress $\tau_R$ with Bay and Wanheim's mixed Coulomb/sticking law (\autoref{eq:mixed-friction}) rather than plain Coulomb friction - \autoref{sec:mixed-friction-model} and \autoref{sec:orowan-model} share this construction in \lstinline{_elastic_plastic_common.py}, differing only in the closure relating $\sigma_x$ and $\sigma_y$.
 
 
     \section{Mixed-friction model for medium passes}\label{sec:mixed-friction-model}
 
-    Pure Coulomb friction, integrated all the way across the contact as in \autoref{eq:karman-elem}, demands ever-increasing shear traction toward the roll gap centre; once a pass is thick or high-friction enough, this exceeds what the material can actually transmit and produces an unrealistic, unbounded pressure spike. \lstinline{karman_mixed_friction_solver.py} implements \lstinline{KarmanMixedFrictionSolver}, which keeps von-Kármán's force balance exactly as in \autoref{eq:karman-elem}, but caps the friction shear stress at the material's sticking (shear-yield) limit once Coulomb friction would exceed it, giving a friction hill that saturates ("sticking") rather than diverging, using the same smoothed Bay and Wanheim~\cite{BayWanheim1976} mixed Coulomb/sticking law as the layer model (\autoref{sec:layer-model}, \autoref{eq:mixed-friction}), applied to the whole (single, homogeneous) cross-section rather than per layer.
+    Pure Coulomb friction, integrated all the way across the contact as in \autoref{eq:karman-elem}, demands ever-increasing shear traction toward the roll gap centre; once a pass is thick or high-friction enough, this exceeds what the material can actually transmit and produces an unrealistic, unbounded pressure spike. \lstinline{karman_mixed_friction_solver.py} implements \lstinline{KarmanMixedFrictionSolver}, which keeps von-Kármán's force balance exactly as in \autoref{eq:karman-elem}, closes $\sigma_x$ and $\sigma_y$ with the plain Mises relation $\sigma_x = \sigma_y + 2k_f/\sqrt3$, and caps the friction shear stress at the material's sticking (shear-yield) limit once Coulomb friction would exceed it, giving a friction hill that saturates ("sticking") rather than diverging, using the same smoothed Bay and Wanheim~\cite{BayWanheim1976} mixed Coulomb/sticking law as the layer model (\autoref{sec:layer-model}, \autoref{eq:mixed-friction}), applied to the whole (single, homogeneous) cross-section rather than per layer. Hooke's-law elastic entry and exit zones bound the plastic zone on both sides (\lstinline{_elastic_plastic_common.py}, shared with \autoref{sec:orowan-model}); unlike the layer model, it has no thermal coupling and treats the cross-section as a single homogeneous layer - it is kept as its own class rather than dispatching to the layer model with a single layer, so that a pass not needing thermal coupling or per-layer resolution does not pay for either.
 
-    Like \lstinline{KarmanSolver}, this solver is rigid-plastic: it has no elastic entry/exit zones and no thermal coupling - those are a separate refinement, orthogonal to the friction-law refinement here, and are covered instead by the layer model once a pass is thick enough to need them (\autoref{sec:dispatch}).
-
-    This is \emph{not} Orowan's own 1943 slab theory~\cite{Orowan1943}, despite addressing the same underlying observation (that pure Coulomb friction becomes unrealistic once passes are thick or high-friction enough). Orowan's actual model replaces the straight strip-element boundaries of \autoref{fig:elementary-stripe} with circular arcs, centred on the roll-gap symmetry line and meeting the roll surfaces at right angles, and corrects the horizontal force balance with an inhomogeneity function $\omega(a,\alpha)$ - an integral over the arc's polar angle - that captures genuinely non-uniform through-thickness deformation directly, rather than refining the friction law on top of the same homogeneous-strip geometry as \autoref{sec:model-approach}. Orowan himself noted the general theory was too complex for practical calculation at the time; later simplifications (e.g.\ Sims' application of it to hot rolling with sticking friction throughout) are reported to give unrealistic results (forming efficiencies above 100\%) under some conditions. \autoref{sec:orowan-model} implements Orowan's own inhomogeneity-function theory (its sticking-friction branch) as a separate, explicitly-selected model, rather than as a further refinement dispatched automatically alongside the models above.
+    This is \emph{not} Orowan's own 1943 slab theory~\cite{Orowan1943}, despite addressing the same underlying observation (that pure Coulomb friction becomes unrealistic once passes are thick or high-friction enough). Orowan's actual model replaces the straight strip-element boundaries of \autoref{fig:elementary-stripe} with circular arcs, centred on the roll-gap symmetry line and meeting the roll surfaces at right angles, and corrects the horizontal force balance with an inhomogeneity function $\omega(a,\alpha)$ - an integral over the arc's polar angle - that captures genuinely non-uniform through-thickness deformation directly, rather than refining the friction law on top of the same homogeneous-strip geometry as \autoref{sec:model-approach}. Orowan himself noted the general theory was too complex for practical calculation at the time; later simplifications (e.g.\ Sims' application of it to hot rolling with sticking friction throughout) are reported to give unrealistic results (forming efficiencies above 100\%) under some conditions. \autoref{sec:orowan-model} implements Orowan's own inhomogeneity-function theory as a separate, explicitly-selected model, rather than as a further refinement dispatched automatically alongside the models above.
 
 
     \section{Elastic-plastic layer model for thick passes}\label{sec:layer-model}
@@ -90,7 +83,7 @@
     For thick passes, the models above miss two further effects that become significant as the relative pass thickness grows: an elastic entry/compression zone and elastic recovery zone at exit (rather than the whole contact being plastic immediately), and, once the strip is thick enough relative to the contact length, meaningfully different flow stress between the surface (which alone feels roll-contact friction) and the core through the pass. \lstinline{layer_solver.py} implements \lstinline{LayerRollingSolver}, a layer-count-parametrized model following Weiner~\cite{Weiner2021} (based on his \emph{RollingHomogeneousElasticPlastic} and \emph{RollingLayerModelElasticPlastic} implementations), which addresses both:
 
     \begin{itemize}
-        \item the strip is discretized into $N$ through-thickness layers (used here for $N>1$, the "thick slab" regime; $N=1$ collapses to a single homogeneous slab but is not used by this plugin's dispatch, since \lstinline{KarmanMixedFrictionSolver} covers that case without elastic zones);
+        \item the strip is discretized into $N$ through-thickness layers (used here for $N>1$, the "thick slab" regime; $N=1$ collapses to a single homogeneous slab equivalent to \autoref{sec:mixed-friction-model}'s own construction, but \lstinline{KarmanMixedFrictionSolver} is kept as its own class rather than dispatching to the layer model with $N=1$, since it needs neither thermal coupling nor per-layer resolution);
         \item each layer starts elastic and yields once its own local Mises criterion is met, giving genuine elastic entry and exit zones per layer instead of a single sharp elastic/plastic split;
         \item friction at the roll interface, and between adjacent layers, follows the same mixed Coulomb/sticking law as \autoref{sec:mixed-friction-model} after Bay and Wanheim~\cite{BayWanheim1976} (\autoref{eq:mixed-friction}), transitioning smoothly from Coulomb sliding to a sticking-limited shear stress as normal pressure grows;
         \item deformation heat, friction heat, conduction between neighbouring layers (and to the rolls), and convective transport are solved simultaneously with the stress equations, so each layer's temperature - and hence its flow stress - evolves individually through the pass.
@@ -106,7 +99,7 @@
 
     where $m$ is the sticking friction coefficient (\lstinline{friction_stiction_coefficient}), $\mathrm{sign}$ the (regularized) direction of relative sliding, and $c$ a smoothing parameter (\lstinline{pressure_smoothness}) controlling how sharply the transition $\Phi$ switches from Coulomb ($\Phi=0$) to sticking ($\Phi=1$) around the critical pressure $p_{N,\mathrm{crit}}$.
 
-    Roll flattening is deliberately out of scope here, as it is for \lstinline{KarmanSolver} and \lstinline{FoilRollingSolver}'s own base radius: all three solvers simply read \lstinline{Roll.working_radius} once rather than deriving a flattened radius themselves. A separate plugin providing a Hitchcock~\cite{Hitchcock1935} (or other) flattened radius via that hook is therefore picked up transparently by every solver in this plugin, with no special-casing needed; the classical linear Hitchcock relation implemented in \lstinline{condition.py} (\lstinline{hitchcock_radius_ratio}) exists solely to \emph{classify} a pass for dispatch (\autoref{sec:dispatch}), and is never fed back into a calculation.
+    Roll flattening is deliberately out of scope here, as it is for the other solvers in this plugin: all three simply read \lstinline{Roll.working_radius} once rather than deriving a flattened radius themselves. A separate plugin providing a Hitchcock~\cite{Hitchcock1935} (or other) flattened radius via that hook is therefore picked up transparently by every solver in this plugin, with no special-casing needed; the classical linear Hitchcock relation implemented in \lstinline{condition.py} (\lstinline{hitchcock_radius_ratio}) exists solely to \emph{classify} a pass for dispatch (\autoref{sec:dispatch}), and is never fed back into a calculation.
 
     Because each pass only sees the incoming profile's own scalar strain and temperature (\lstinline{pyroll-core} has no native concept of a through-thickness state carried from one pass to the next), all layers start uniform; the elastic entry zone therefore has no mechanism to break symmetry between layers (matching the reference implementation, which defines but never uses a redundant-shear correction after Ekelund~\cite{Ekelund1933}). Layers still diverge from the first plastification onward, since only the outermost layers feel roll-contact friction directly while inner layers feel the weaker inner-friction law, and the resulting temperature and flow-stress differences compound through the rest of the pass.
 
@@ -116,19 +109,18 @@
     Once elastic roll flattening becomes severe enough, even a scalar (Hitchcock) roll-flattening correction to \lstinline{Roll.working_radius} is no longer accurate, because the flattened roll-gap shape stops being well approximated by a single effective radius. \lstinline{foil_solver.py} implements \lstinline{FoilRollingSolver}, following Mauk and Overhagen~\cite{MaukOverhagen2013}, which instead computes the true, generally non-circular, deformed roll-gap shape directly: the normal-pressure distribution along the contact is superposed with elastic half-space (Boussinesq/Johnson~\cite{Johnson1985}) influence coefficients to obtain the roll surface's own elastic deflection, iterated to convergence with the strip's own elastic-plastic stress solution (elastic entry, plastic slip, an optional sticking zone, plastic slip, elastic exit).
 
 
-    \section{Selecting between the four models}\label{sec:dispatch}
+    \section{Selecting between the three models}\label{sec:dispatch}
 
-    \lstinline{roll_pass.py} wires the four solvers together behind a single hook, \lstinline{karman_solution}, so that \lstinline{roll_force}, \lstinline{Roll.roll_torque}, \lstinline{Roll.neutral_point} and the profile velocity hooks work unchanged regardless of which solver actually ran:
+    \lstinline{roll_pass.py} wires the three solvers together behind a single hook, \lstinline{karman_solution}, so that \lstinline{roll_force}, \lstinline{Roll.roll_torque}, \lstinline{Roll.neutral_point} and the profile velocity hooks work unchanged regardless of which solver actually ran:
 
     \begin{enumerate}
-        \item if the roll or profile elastic properties (\lstinline{elastic_modulus}, \lstinline{poissons_ratio}) are not set, the pass falls back to the rigid-roll model of \autoref{sec:model-approach} unconditionally, since none of the elastic effects (or the Hitchcock-ratio/Ld-Hm checks below) can be evaluated;
-        \item otherwise, the Hitchcock flattened-to-nominal radius ratio $r'/r$ is evaluated (Mauk and Overhagen~\cite{MaukOverhagen2013} give $r'/r \geq 2$ as the point where a circular roll-gap assumption is no longer trustworthy); if exceeded, the foil-rolling model of \autoref{sec:foil-model} is used;
+        \item the Hitchcock flattened-to-nominal radius ratio $r'/r$ is evaluated (Mauk and Overhagen~\cite{MaukOverhagen2013} give $r'/r \geq 2$ as the point where a circular roll-gap assumption is no longer trustworthy), using \lstinline{KarmanMixedFrictionSolver}'s own force estimate for the pass; if exceeded, the foil-rolling model of \autoref{sec:foil-model} is used;
         \item otherwise, the classical contact-length-to-mean-thickness ratio $L_d/H_m$ decides between the layer model's thick-slab configuration (\autoref{sec:layer-model}) and the mixed-friction model (\autoref{sec:mixed-friction-model}) for medium passes.
     \end{enumerate}
 
-    All three limits are themselves hooks (\autoref{tab:hookspecs}) and can be overridden per pass, including forcing a particular model unconditionally. \lstinline{KarmanMixedFrictionSolver} does not itself need the elastic properties or thermal data the other refinements do, but is kept behind the same elastic-properties gate as step 1 for consistency, rather than being dispatched independently of it.
+    Both limits are themselves hooks (\autoref{tab:hookspecs}) and can be overridden per pass, including forcing a particular model unconditionally. Since all three models are elastic-plastic, the roll and profile elastic properties (\lstinline{elastic_modulus}, \lstinline{poissons_ratio}) must be set for every pass - there is no rigid-plastic fallback for passes that omit them; a pass without them simply fails to solve.
 
-    \autoref{tab:model-overview} summarizes all five models by their underlying stress-strain treatment, friction law, and the thickness regime each is intended for - the four dispatched automatically by the criteria above, plus \lstinline{OrowanSolver} (\autoref{sec:orowan-model}), which is not.
+    \autoref{tab:model-overview} summarizes all four models by their underlying stress-strain treatment, friction law, and the thickness regime each is intended for - the three dispatched automatically by the criteria above, plus \lstinline{OrowanSolver} (\autoref{sec:orowan-model}), which is not.
 
     \begin{table}
         \centering
@@ -138,15 +130,10 @@
             \toprule
             Model & Stress-strain model & Friction model & Recommended regime \\
             \midrule
-            \texttt{Karman\-Solver} &
-            rigid-plastic, homogeneous cross-section &
-            pure Coulomb &
-            fallback only - used whenever \texttt{elas\-tic\_mod\-ulus}/\texttt{pois\-sons\_ra\-tio} are not set, at any thickness; superseded by one of the other four the moment elastic data is available \\
-            \addlinespace
             \texttt{Karman\-Mixed\-Friction\-Solver} &
-            rigid-plastic, homogeneous cross-section &
+            elastic-plastic, homogeneous cross-section &
             Bay/Wanheim mixed Coulomb/sticking &
-            medium gauge: $r'/r < 2$ (default) and $L_d/H_m \geq 1$ (default) - the plugin's default once elastic data is present and neither condition below triggers \\
+            medium gauge: $r'/r < 2$ (default) and $L_d/H_m \geq 1$ (default) - the plugin's default once neither condition below triggers \\
             \addlinespace
             \texttt{Layer\-Rolling\-Solver} &
             elastic-plastic, $N$ through-thickness layers, full thermal coupling &
@@ -160,8 +147,8 @@
             \addlinespace
             \texttt{Orowan\-Solver} &
             elastic-plastic, single homogeneous cross-section, circular-arc inhomogeneity correction &
-            sticking (default) or Bay/Wanheim mixed &
-            not gated by $L_d/H_m$ or $r'/r$ - always selected explicitly (\autoref{sec:usage-instructions}). A hot-rolling alternative to \texttt{Karman\-Mixed\-Friction\-Solver}/\texttt{Layer\-Rolling\-Solver}, typically overlapping the medium-to-thick gauge range; default \texttt{friction\_model="sticking"} for scale/oxide-dominated contacts, \texttt{"mixed"} otherwise \\
+            Bay/Wanheim mixed &
+            not gated by $L_d/H_m$ or $r'/r$ - always selected explicitly (\autoref{sec:usage-instructions}). A hot-rolling alternative to \texttt{Karman\-Mixed\-Friction\-Solver}/\texttt{Layer\-Rolling\-Solver}, typically overlapping the medium-to-thick gauge range \\
             \bottomrule
         \end{tabular}
     \end{table}
@@ -180,7 +167,7 @@
         \label{eq:omega-orowan}
     \end{gather}
 
-    where $\theta$ is the polar angle within an arc and $J_1$ the order-1 Bessel function of the first kind. The "$-$" sign in \autoref{eq:orowan-closure} applies on the entry (Vorlauf) side, "$+$" on the exit (Nachlauf) side, mirroring the sign convention already used for $\tau_R$ in \autoref{eq:karman-elem}. The inhomogeneity function $\omega_O$ ranges from $1$ (frictionless limit) down to $\pi/4 \approx 0.785$ as $\alpha \to 0$ (full sticking) and depends only weakly on $\alpha$ otherwise~\cite[Abb.~4.4/4]{Overhagen2018} - it is what makes \autoref{eq:orowan-closure} a genuine correction to, rather than a mere re-derivation of, the plain Mises relation $\sigma_x = \sigma_y + 2k_f/\sqrt3$ every other model in this plugin uses. Orowan's general theory pairs \autoref{eq:orowan-closure} with a sliding-friction counterpart (his Gl.~4.4/5) and a friction-ratio parameter $a_O = 2\mu\sigma_N/k_f \in [0,1]$ blending between the two; \lstinline{OrowanSolver}'s default, \texttt{friction\_model="sticking"}, implements only the sticking-friction branch above ($a_O \equiv 1$) applied throughout the contact, since sticking friction (from scale, oxide layers, and high temperature) is the realistic assumption across the whole arc in hot rolling - the regime this model targets. Elastic entry and exit zones bound the sticking-plastic zone on both sides, using the same Hooke's-law construction as \autoref{sec:layer-model}'s $N=1$ case, so that (unlike Orowan's own rigid-plastic 1943 paper) the whole contact is not assumed plastic from first contact.
+    where $\theta$ is the polar angle within an arc and $J_1$ the order-1 Bessel function of the first kind. The "$-$" sign in \autoref{eq:orowan-closure} applies on the entry (Vorlauf) side, "$+$" on the exit (Nachlauf) side, mirroring the sign convention already used for $\tau_R$ in \autoref{eq:karman-elem}. The inhomogeneity function $\omega_O$ ranges from $1$ (frictionless limit) down to $\pi/4 \approx 0.785$ as $\alpha \to 0$ (full sticking) and depends only weakly on $\alpha$ otherwise~\cite[Abb.~4.4/4]{Overhagen2018} - it is what makes \autoref{eq:orowan-closure} a genuine correction to, rather than a mere re-derivation of, the plain Mises relation $\sigma_x = \sigma_y + 2k_f/\sqrt3$ every other model in this plugin uses. Orowan's general theory pairs \autoref{eq:orowan-closure} with a sliding-friction counterpart (his Gl.~4.4/5) and a friction-ratio parameter $a_O = 2\mu\sigma_N/k_f \in [0,1]$ blending between the two; rather than rederiving Gl.~4.4/5, \lstinline{OrowanSolver} instead keeps \autoref{eq:orowan-closure}'s sticking-limit structure ($a_O \equiv 1$) throughout and layers Bay and Wanheim's mixed Coulomb/sticking law~\cite{BayWanheim1976} (\autoref{eq:mixed-friction}, the same law \autoref{sec:mixed-friction-model} and \autoref{sec:layer-model} use) on top of it - see below for exactly how the two combine. Elastic entry and exit zones bound the plastic zone on both sides (\lstinline{_elastic_plastic_common.py}, shared with \autoref{sec:mixed-friction-model}), so that (unlike Orowan's own rigid-plastic 1943 paper) the whole contact is not assumed plastic from first contact.
 
     Reconstructing \autoref{eq:orowan-closure}--\autoref{eq:omega-orowan} from~\cite{Overhagen2018} required three specific interpretive choices, each checked as far as the available material allows but not verifiable against Orowan's original 1943 paper directly - documented in full in \lstinline{orowan_solver.py}'s module docstring, and summarized here:
     \begin{itemize}
@@ -190,12 +177,12 @@
     \end{itemize}
     None of these affect $\omega_O$'s qualitative role or \autoref{eq:orowan-closure}'s overall structure; they are exactly the kind of detail worth re-checking against Orowan's 1943 paper directly if it becomes available.
 
-    Passing \texttt{friction\_model="mixed"} replaces the sticking-only branch above with Bay and Wanheim's mixed Coulomb/sticking law~\cite{BayWanheim1976} (\autoref{eq:mixed-friction}, the same law \autoref{sec:mixed-friction-model} and \autoref{sec:layer-model} use) - for passes where friction is not high enough for sticking to hold across the whole contact, rather than Orowan's own $a_O$-dependent sliding branch (his Gl.~4.4/5). Rather than rederiving Gl.~4.4/5, this keeps \autoref{eq:orowan-closure}'s structure unchanged and generalizes only $\omega_O$: the sticking value $\omega_O(\alpha)$ of \autoref{eq:omega-orowan} is linearly blended toward the frictionless limit $1$ using $\Phi$, the same smooth Coulomb-to-sticking transition variable \autoref{eq:mixed-friction} already computes for the friction law itself,
+    Generalizing \autoref{eq:orowan-closure} to mixed friction, rather than Orowan's own $a_O$-dependent sliding branch (his Gl.~4.4/5), keeps its structure unchanged and generalizes only $\omega_O$: the sticking value $\omega_O(\alpha)$ of \autoref{eq:omega-orowan} is linearly blended toward the frictionless limit $1$ using $\Phi$, the same smooth Coulomb-to-sticking transition variable \autoref{eq:mixed-friction} already computes for the friction law itself,
     \begin{equation}
         \omega_{O,\mathrm{eff}}(\alpha, \Phi) = (1-\Phi)\cdot 1 + \Phi\cdot\omega_O(\alpha)
         \label{eq:omega-orowan-mixed}
     \end{equation}
-    which is a deliberate, pragmatic hybrid rather than a literal implementation of Gl.~4.4/5 - justified by $\omega_O$'s own weak dependence on its arguments (noted above), so linearly interpolating between its two known closed-form endpoints, weighted by the regime indicator already driving the friction law, avoids needing the general, quadrature-only $\omega_O(\alpha, a_O)$ for $a_O \notin \{0,1\}$. Since $\Phi$ itself depends on $\sigma_y$ - the quantity \autoref{eq:orowan-closure} solves for - \lstinline{OrowanSolver} iterates \autoref{eq:orowan-closure} and \autoref{eq:omega-orowan-mixed} to a fixed point (converging in a handful of iterations, given how weakly $\omega_O$ varies). Unlike the sticking-only default, whose elastic zones carry no friction at all (Bay and Wanheim's law is well-behaved as pressure $\to 0$, unlike assuming sticking friction where contact pressure is still essentially zero - see \lstinline{orowan_solver.py}'s module docstring), \texttt{friction\_model="mixed"} applies the same mixed friction law in the elastic entry/exit zones too, exactly as \autoref{sec:layer-model} already does.
+    which is a deliberate, pragmatic hybrid rather than a literal implementation of Gl.~4.4/5 - justified by $\omega_O$'s own weak dependence on its arguments (noted above), so linearly interpolating between its two known closed-form endpoints, weighted by the regime indicator already driving the friction law, avoids needing the general, quadrature-only $\omega_O(\alpha, a_O)$ for $a_O \notin \{0,1\}$. Since $\Phi$ itself depends on $\sigma_y$ - the quantity \autoref{eq:orowan-closure} solves for - \lstinline{OrowanSolver} iterates \autoref{eq:orowan-closure} and \autoref{eq:omega-orowan-mixed} to a fixed point (converging in a handful of iterations, given how weakly $\omega_O$ varies). Bay and Wanheim's law is well-behaved as pressure $\to 0$ (unlike assuming sticking friction where contact pressure is still essentially zero), so it applies unmodified in the elastic entry/exit zones too, exactly as \autoref{sec:mixed-friction-model} and \autoref{sec:layer-model} already do.
 
     \lstinline{OrowanSolver} is not wired into the \lstinline{karman_solution} dispatch hook of \autoref{sec:dispatch}: it must be instantiated directly, \lstinline{OrowanSolver(roll_pass=roll_pass)}, for a pass whose profile has already been solved. This is a deliberate scope decision, not an oversight - the model is a genuinely different, orthogonal refinement (curved-strip inhomogeneity) from the axis \autoref{sec:dispatch} already selects along (elastic flattening, then contact-length-to-thickness), it applies only to a single homogeneous cross-section (no layer-count parametrization, unlike \autoref{sec:layer-model}), and it has no thermal coupling (flow stress is evaluated at the incoming profile's own scalar temperature throughout, like \autoref{sec:model-approach} and \autoref{sec:mixed-friction-model}). \autoref{tab:orowan-comparison} summarizes how it relates to the other models in this plugin.
 
@@ -207,11 +194,10 @@
             \toprule
             Model & Strip geometry & Friction law & Elastic zones & Thermal \\
             \midrule
-            \texttt{Karman\-Solver} & straight, homogeneous & pure Coulomb & none & none \\
-            \texttt{Karman\-Mixed\-Friction\-Solver} & straight, homogeneous & Bay/Wanheim mixed & none & none \\
+            \texttt{Karman\-Mixed\-Friction\-Solver} & straight, homogeneous & Bay/Wanheim mixed & entry \& exit & none \\
             \texttt{Layer\-Rolling\-Solver} & straight, $N$ discrete layers & Bay/Wanheim mixed & entry \& exit, per layer & full \\
             \texttt{Foil\-Rolling\-Solver} & straight, homogeneous, elastic roll contour & Coulomb + optional sticking & entry \& exit & none \\
-            \texttt{Orowan\-Solver} & circular arc, continuous inhomogeneity & sticking (default) or Bay/Wanheim mixed & entry \& exit & none \\
+            \texttt{Orowan\-Solver} & circular arc, continuous inhomogeneity & Bay/Wanheim mixed & entry \& exit & none \\
             \bottomrule
         \end{tabular}
     \end{table}
@@ -224,9 +210,9 @@
     Furthermore, an implementation of the \lstinline{roll_torque} and \lstinline{neutral_point} hooks on \lstinline{RollPass.Roll} is provided.
 
     Additionally, hooks on \lstinline{RollPass} are defined, which are used in the calculation, as listed in \autoref{tab:hookspecs}.
-    The hooks \lstinline{back_tension}, \lstinline{front_tension} and \lstinline{coulomb_friction_coefficient} have to be set and adjusted individually; the foil and layer models additionally need \lstinline{elastic_modulus} and \lstinline{poissons_ratio} set on both \lstinline{RollPass.Roll} and \lstinline{RollPass.InProfile} to be selected at all (see \autoref{sec:dispatch}), and the layer model's thermal coupling needs \lstinline{specific_heat_capacity}, \lstinline{thermal_conductivity} and \lstinline{density} set on both.
+    The hooks \lstinline{back_tension}, \lstinline{front_tension} and \lstinline{coulomb_friction_coefficient} have to be set and adjusted individually; since all three dispatched models are elastic-plastic, \lstinline{elastic_modulus} and \lstinline{poissons_ratio} must also be set on both \lstinline{RollPass.Roll} and \lstinline{RollPass.InProfile} for every pass (see \autoref{sec:dispatch}) - there is no fallback for passes that omit them - and the layer model's thermal coupling additionally needs \lstinline{specific_heat_capacity}, \lstinline{thermal_conductivity} and \lstinline{density} set on both.
 
-    \lstinline{OrowanSolver} (\autoref{sec:orowan-model}) is not reachable through \lstinline{karman_solution}, since it is not part of the automatic dispatch of \autoref{sec:dispatch}; call it directly once the pass has been solved, e.g.\ \lstinline{OrowanSolver(roll_pass=roll_pass)} after \lstinline{PassSequence([roll_pass]).solve(in_profile)}, then read \lstinline{roll_force_per_unit_width}, \lstinline{roll_torque_per_unit_width}, \lstinline{neutral_plane_position} and \lstinline{solution} off the returned instance directly, the same attributes the other four solvers expose.
+    \lstinline{OrowanSolver} (\autoref{sec:orowan-model}) is not reachable through \lstinline{karman_solution}, since it is not part of the automatic dispatch of \autoref{sec:dispatch}; call it directly once the pass has been solved, e.g.\ \lstinline{OrowanSolver(roll_pass=roll_pass)} after \lstinline{PassSequence([roll_pass]).solve(in_profile)}, then read \lstinline{roll_force_per_unit_width}, \lstinline{roll_torque_per_unit_width}, \lstinline{neutral_plane_position} and \lstinline{solution} off the returned instance directly, the same attributes the other three solvers expose.
 
     \begin{table}
         \centering
@@ -239,7 +225,7 @@
             \texttt{coulomb\_friction\_coefficient} & Coulomb's friction coefficient $\mu$ \\
             \texttt{back\_tension} & Back tension of the roll pass $\sigma_{x,0}$ \\
             \texttt{front\_tension} & Front tension of the roll pass $\sigma_{x,1}$ \\
-            \texttt{karman\_solution} & Solver object (of one of the four models) with solution values as attributes \\
+            \texttt{karman\_solution} & Solver object (of one of the three models) with solution values as attributes \\
             \texttt{foil\_rolling\_condition} & Whether the foil-rolling model (\autoref{sec:foil-model}) is used \\
             \texttt{foil\_rolling\_hitchcock\_limit} & Hitchcock ratio $r'/r$ above which the foil model is used (default 2.0) \\
             \texttt{thick\_slab\_condition} & Whether the multi-layer, thick-slab configuration (\autoref{sec:layer-model}) is used instead of \texttt{KarmanMixedFrictionSolver} (\autoref{sec:mixed-friction-model}) \\

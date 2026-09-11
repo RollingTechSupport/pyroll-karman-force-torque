@@ -1,6 +1,7 @@
 """Criteria for switching between the plugin's solvers:
-:class:`.karman_solver.KarmanSolver` (rigid roll, no elastic zones),
-:class:`.layer_solver.LayerRollingSolver` (elastic-plastic zones, medium and
+:class:`.karman_mixed_friction_solver.KarmanMixedFrictionSolver`
+(elastic-plastic, single homogeneous slab, "medium"),
+:class:`.layer_solver.LayerRollingSolver` (elastic-plastic zones, multi-layer,
 thick slabs), and :class:`.foil_solver.FoilRollingSolver` (full elastic roll
 contour, foil rolling).
 
@@ -10,9 +11,9 @@ flattened-radius equation
     r'/r = 1 + C * F' / (h0 - h1),  with  C = 16 * (1 - nu_R**2) / (pi * E_R)
 
 (``F'`` = roll force per unit width; the per-unit-width form of eq. 1/2 needs no
-strip width) stays "usable" only while ``r'/r < 2``; beyond that a rigid- or
-Hitchcock-flattened-roll model is no longer trustworthy and the full elastic
-foil-rolling model is required.
+strip width) stays "usable" only while ``r'/r < 2``; beyond that a
+single-layer or Hitchcock-flattened-roll model is no longer trustworthy and
+the full elastic foil-rolling model is required.
 
 ``contact_length_over_mean_thickness`` is the classical Ld/Hm ratio deciding
 whether through-thickness deformation is homogeneous enough for a

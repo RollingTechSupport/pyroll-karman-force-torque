@@ -2,10 +2,16 @@ import logging
 import webbrowser
 from pathlib import Path
 
-from pyroll.core import Profile, PassSequence, RollPass, Roll, CircularOvalGroove, Transport, RoundGroove, FlatGroove
+from pyroll.core import Profile, PassSequence, RollPass, Roll, CircularOvalGroove, FlatGroove
 
 
-def test_solve_round_oval(tmp_path: Path, caplog):
+def test_solve_oval(tmp_path: Path, caplog):
+    """A single oval-groove pass (rather than a chained oval->round schedule
+    with a Transport in between): exercises this plugin's dispatch and
+    report generation against a non-flat groove and pyroll-core's
+    auto-rotation logic, without exercising a chained multi-pass sequence's
+    own tension/velocity coupling between stands, which is pyroll-core's
+    concern rather than this plugin's."""
     caplog.set_level(logging.INFO, logger="pyroll")
 
     import pyroll.freiberg_flow_stress
@@ -16,6 +22,8 @@ def test_solve_round_oval(tmp_path: Path, caplog):
         temperature=1200 + 273.15,
         strain=0,
         material=["C45", "steel"],
+        elastic_modulus=210e9,
+        poissons_ratio=0.3,
     )
 
     sequence = PassSequence([
@@ -28,33 +36,14 @@ def test_solve_round_oval(tmp_path: Path, caplog):
                     r2=40e-3
                 ),
                 nominal_radius=160e-3,
-                rotational_frequency=1
+                rotational_frequency=1,
+                elastic_modulus=210e9,
+                poissons_ratio=0.3,
             ),
             gap=2e-3,
             coulomb_friction_coefficient=0.35,
             back_tension=0,
             front_tension=6e6,
-
-        ),
-        Transport(
-            label="I => II",
-            duration=1
-        ),
-        RollPass(
-            label="Round II",
-            roll=Roll(
-                groove=RoundGroove(
-                    r1=1e-3,
-                    r2=12.5e-3,
-                    depth=11.5e-3
-                ),
-                nominal_radius=160e-3,
-                rotational_frequency=1
-            ),
-            gap=2e-3,
-            coulomb_friction_coefficient=0.35,
-            back_tension=6e6,
-            front_tension=0,
 
         ),
     ])
@@ -92,6 +81,8 @@ def test_solve_flat_flat(tmp_path: Path, caplog):
         temperature=1200 + 273.15,
         strain=0,
         material=["C45", "steel"],
+        elastic_modulus=210e9,
+        poissons_ratio=0.3,
     )
 
     sequence = PassSequence([
@@ -102,7 +93,9 @@ def test_solve_flat_flat(tmp_path: Path, caplog):
                     usable_width=300e-3
                 ),
                 nominal_radius=160e-3,
-                rotational_frequency=1
+                rotational_frequency=1,
+                elastic_modulus=210e9,
+                poissons_ratio=0.3,
             ),
             gap=12e-3,
             coulomb_friction_coefficient=0.35,

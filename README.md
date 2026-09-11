@@ -2,26 +2,27 @@
 
 PyRolL Plugin for calculation of power and labour solving von-Karman ODE for a equivalent flat pass.
 
-The plugin automatically selects between four solvers depending on the pass,
-covering the full range from thick slabs to metal foils:
+The plugin automatically selects between three solvers depending on the pass,
+covering the full range from thick slabs to metal foils. All three are
+elastic-plastic (Hooke's-law entry/exit zones bounding the plastic zone) and
+use Bay & Wanheim's smoothed mixed Coulomb/sticking friction law throughout
+- there is no rigid-plastic or pure-Coulomb fallback:
 
-- **`KarmanSolver`** (rigid roll, pure Coulomb friction, no elastic zones) -
-  the classical model, used whenever elastic effects are negligible or the
-  roll/profile elastic properties (`elastic_modulus`/`poissons_ratio`)
-  aren't set at all.
-- **`KarmanMixedFrictionSolver`** ("medium" passes) - the same rigid-plastic,
-  no-elastic-zone structure as `KarmanSolver`, but with Bay & Wanheim's
-  smoothed mixed Coulomb/sticking friction law instead of pure Coulomb,
-  avoiding the unbounded-pressure artifact pure Coulomb friction produces
-  once a pass is thick/high-friction enough. No thermal coupling. This is
-  *not* Orowan's actual 1943 slab theory (a substantially different,
-  circular-arc/inhomogeneity-function model) - see `docs/docs.tex` for the
-  distinction.
-- **`LayerRollingSolver`** (thick passes) - adds elastic entry/exit zones
-  and through-thickness resolution into multiple layers with full thermal
-  coupling. Ports Max Weiner's thesis work (TU Bergakademie Freiberg).
-  Used for the "thick slab" case where surface and core develop
-  meaningfully different flow stress through the pass.
+- **`KarmanMixedFrictionSolver`** ("medium" passes) - a single homogeneous
+  slab, elastic-plastic zones, Bay & Wanheim mixed friction. No thermal
+  coupling. Also available as `OrowanSolver`, which uses the same
+  elastic-plastic/mixed-friction construction but Orowan's own
+  inhomogeneity-corrected closure (Orowan, "The Calculation of Roll Pressure
+  in Hot and Cold Flat Rolling", Proc. IMechE 150, 1943) instead of the
+  plain Mises one - a substantially different, circular-arc/inhomogeneity-
+  function model; see `docs/docs.tex` for the distinction. `OrowanSolver` is
+  not part of the automatic dispatch (available for direct use).
+- **`LayerRollingSolver`** (thick passes) - through-thickness resolution
+  into multiple layers with full thermal coupling, on top of the same
+  elastic-plastic/mixed-friction construction. Ports Max Weiner's thesis
+  work (TU Bergakademie Freiberg). Used for the "thick slab" case where
+  surface and core develop meaningfully different flow stress through the
+  pass.
 - **`FoilRollingSolver`** (foil rolling) - computes the true,
   elastically-flattened (generally non-circular) roll-gap shape instead of
   assuming a circular contact, following Mauk & Overhagen, "Prozessmodell
@@ -35,15 +36,13 @@ mean-thickness ratio `Ld/Hm` decides thick (`LayerRollingSolver`, multiple
 layers) vs. medium (`KarmanMixedFrictionSolver`) (`RollPass.layer_model_ld_hm_limit`,
 default `1.0`, via `RollPass.thick_slab_condition`; layer count via
 `RollPass.layer_model_layer_count`, default `5`). All of these are
-overridable hooks, including forcing a specific model unconditionally. The
-foil and layer models require `elastic_modulus`/`poissons_ratio` on both
-the roll and the profile (needed for the Hitchcock-ratio/Ld-Hm checks
-themselves, and for the layer model's own elastic zones); the layer
-model's thermal coupling additionally needs `specific_heat_capacity`/
-`thermal_conductivity`/`density` on both. Without the elastic properties,
-the plugin falls back to the classical rigid-roll model - `KarmanMixedFrictionSolver`
-needs neither elastic properties nor thermal data, but stays behind the
-same gate as the other refinements for consistency.
+overridable hooks, including forcing a specific model unconditionally.
+`elastic_modulus`/`poissons_ratio` on both the roll and the profile are
+required for every pass (needed for the Hitchcock-ratio/Ld-Hm checks
+themselves, and for every solver's own elastic zones) - there is no
+fallback for passes that omit them, they simply error. The layer model's
+thermal coupling additionally needs `specific_heat_capacity`/
+`thermal_conductivity`/`density` on both.
 
 Roll flattening itself is out of this plugin's scope: all three solvers
 just read `Roll.working_radius` once, the same hook `pyroll-core` already

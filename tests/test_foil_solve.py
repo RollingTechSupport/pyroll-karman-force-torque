@@ -59,15 +59,16 @@ def _build_pass(roll_elastic_modulus, hitchcock_limit=None):
     return roll_pass
 
 
-def test_normal_pass_stays_on_rigid_solver(caplog):
-    """The existing flat-pass example (large gauge, moderate force) is far from
-    the foil-rolling regime, and Roll/Profile don't set elastic properties at
-    all - the condition hook must fall back gracefully rather than error."""
+def test_missing_elastic_properties_raises(caplog):
+    """All solvers in this plugin (KarmanMixedFrictionSolver, LayerRollingSolver,
+    FoilRollingSolver) are elastic-plastic, so elastic properties on both Roll
+    and Profile are mandatory - there is no more rigid-plastic fallback for
+    passes that omit them. Omitting them (as the existing flat-pass example
+    used to) must now fail loudly rather than silently falling back."""
     caplog.set_level(logging.INFO, logger="pyroll")
 
     import pyroll.freiberg_flow_stress
     import pyroll.karman_force_torque
-    from pyroll.karman_force_torque.karman_solver import KarmanSolver
 
     in_profile = Profile.box(
         height=15e-3,
@@ -88,17 +89,17 @@ def test_normal_pass_stays_on_rigid_solver(caplog):
         back_tension=0,
         front_tension=0,
     )
-    PassSequence([roll_pass]).solve(in_profile)
-
-    assert not roll_pass.foil_rolling_condition
-    assert isinstance(roll_pass.karman_solution, KarmanSolver)
+    with pytest.raises(RuntimeError) as excinfo:
+        PassSequence([roll_pass]).solve(in_profile)
+    assert isinstance(excinfo.value.__cause__, AttributeError)
 
 
 def test_hitchcock_ratio_exceeds_default_limit_for_thin_foil():
-    """The report's own worked example (Abb. 9, kf=1000 N/mm^2, h0=0.03/h1=0.015mm,
-    d=25mm) is deep in Hitchcock-invalid territory (r'/r >> 2). This checks the
-    ratio computation itself, exactly as ``foil_rolling_condition``'s own
-    hookimpl does it: from a flat (rigid-roll) force estimate, not from
+    """A scaled-down variant of the report's own worked example (Abb. 9,
+    kf=1000 N/mm^2, d=25mm, 50% reduction) deep in Hitchcock-invalid
+    territory (r'/r >= 2). This checks the ratio computation itself, exactly
+    as ``foil_rolling_condition``'s own hookimpl does it: from a flat
+    (single-layer, elastic-plastic mixed-friction) force estimate, not from
     whichever solver ends up actually dispatched for the pass (with elastic
     properties set, that's always the layer model here since
     ``foil_rolling_hitchcock_limit`` is overridden sky-high to force
@@ -112,11 +113,11 @@ def test_hitchcock_ratio_exceeds_default_limit_for_thin_foil():
     """
     import pyroll.karman_force_torque
     from pyroll.karman_force_torque.condition import hitchcock_radius_ratio
-    from pyroll.karman_force_torque.karman_solver import KarmanSolver
+    from pyroll.karman_force_torque.karman_mixed_friction_solver import KarmanMixedFrictionSolver
 
     kf = 1000e6
     in_profile = Profile.box(
-        height=0.03e-3, width=300e-3, temperature=293.15, strain=0,
+        height=0.015e-3, width=300e-3, temperature=293.15, strain=0,
         material=["dummy"], elastic_modulus=210e9, poissons_ratio=0.3,
         specific_heat_capacity=500.0, thermal_conductivity=25.0, density=7000.0,
         flow_stress_function=_flow_stress(kf),
@@ -132,7 +133,7 @@ def test_hitchcock_ratio_exceeds_default_limit_for_thin_foil():
             temperature=293.15,
             specific_heat_capacity=450.0, thermal_conductivity=40.0, density=7850.0,
         ),
-        gap=0.015e-3,
+        gap=0.0075e-3,
         coulomb_friction_coefficient=0.05,
         back_tension=0,
         front_tension=0,
@@ -140,7 +141,7 @@ def test_hitchcock_ratio_exceeds_default_limit_for_thin_foil():
     )
     PassSequence([roll_pass]).solve(in_profile)
 
-    flat_solution = KarmanSolver(roll_pass=roll_pass)
+    flat_solution = KarmanMixedFrictionSolver(roll_pass=roll_pass)
     ratio = hitchcock_radius_ratio(roll_pass, flat_solution.roll_force_per_unit_width)
     assert ratio >= 2.0  # the report's stated default limit (foil_rolling_hitchcock_limit)
 
@@ -207,8 +208,8 @@ def test_foil_solver_converges_for_thinner_foils(h0):
     mu=0.1, back/front tension at ~24%/34% of kf), scaled down in absolute
     gauge from 0.1mm to 0.07/0.05/0.03mm. The Hitchcock r'/r ratio (hence
     the elastic-flattening effect) grows as the foil gets thinner for the
-    same roll radius - verified separately against KarmanSolver's flat
-    estimate (not repeated here, see condition.py's own coverage) - so this
+    same roll radius - verified separately against KarmanMixedFrictionSolver's
+    flat estimate (not repeated here, see condition.py's own coverage) - so this
     checks the *solver* keeps converging with sane outputs as that
     happens; it does not for every thinner gauge (0.03mm needed a lighter
     10% reduction to converge with these otherwise-unchanged

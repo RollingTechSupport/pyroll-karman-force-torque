@@ -3,8 +3,8 @@
 Implements the Fleck/Johnson/Sutcliffe-type model described in Mauk & Overhagen,
 "Prozessmodell zum Kaltwalzen von Metallfolien mit keramischen Arbeitswalzen auf
 Mehrwalzengerüsten" (2013), and the accompanying MATLAB implementation by
-C. Overhagen ("lee_sutcliffe"). Unlike :class:`.karman_solver.KarmanSolver`, this
-solver does not assume the roll stays circular in the contact zone: the roll-gap
+C. Overhagen ("lee_sutcliffe"). Unlike :class:`.karman_mixed_friction_solver.KarmanMixedFrictionSolver`,
+this solver does not assume the roll stays circular in the contact zone: the roll-gap
 shape is found by superposing elastic half-space (Johnson) point-load solutions
 over the strip's own normal-pressure distribution and iterating to convergence.
 
@@ -68,7 +68,7 @@ def _influence_matrix(n: int, step: float) -> np.ndarray:
 class FoilRollingSolver:
     """Elastic-plastic solution of the foil-rolling problem for a roll pass.
 
-    Provides the same public attributes as :class:`.karman_solver.KarmanSolver`
+    Provides the same public attributes as the other solvers in this plugin
     (``roll_force_per_unit_width``, ``roll_torque_per_unit_width``,
     ``entry_velocity``, ``exit_velocity``, ``neutral_plane_position``,
     ``solution``) so that consumers (report plotting, the roll-pass hooks) do
@@ -534,7 +534,7 @@ class FoilRollingSolver:
         # Kinematics via mass continuity, with the roll surface velocity projected
         # onto the horizontal using the *rigid* roll angle at the neutral point
         # (the report neglects this projection entirely for foil rolling, eq. 41-43,
-        # since angles are tiny there; keeping it matches KarmanSolver's convention
+        # since angles are tiny there; keeping it matches this plugin's other solvers' convention
         # and is a negligible correction in the foil-rolling regime anyway).
         rotational_frequency = self.roll_pass.roll.rotational_frequency
         neutral_angle = -np.arcsin(np.clip(self.neutral_plane_position / self.radius, -1, 1))
