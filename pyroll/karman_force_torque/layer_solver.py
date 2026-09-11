@@ -358,7 +358,7 @@ class LayerPassSection:
                 t_i = y[3 + ns + i]
                 phi_v_i = _phi_v(s.h0[i], y[3 + i])
                 kf_i = s.kf(t_i, phi_v_i, self.phi_dot_vm)
-                margins.append((sigma_x_layers[i] - sigma_y) - kf_i)
+                margins.append((sigma_x_layers[i] - sigma_y) - 2 / np.sqrt(3) * kf_i)
             return min(margins) if margins else 1.0
 
         event.terminal = True
@@ -375,15 +375,24 @@ class LayerPassSection:
             t_i = y[3 + ns + i]
             phi_v_i = _phi_v(s.h0[i], y[3 + i])
             kf_i = s.kf(t_i, phi_v_i, self.phi_dot_vm)
-            if (sigma_x_layers[i] - sigma_y) >= kf_i - 1e-6 * max(abs(kf_i), 1.0):
+            if (sigma_x_layers[i] - sigma_y) >= 2 / np.sqrt(3) * kf_i - 1e-6 * max(abs(kf_i), 1.0):
                 new_active.add(i)
         return frozenset(new_active) if new_active else active
 
-    def _decompose_state(self, y, active, elastic):
+    def _decompose_state(self, y, active, elastic, assume_padded=False):
         """Return (sigma_y, {layer index -> its own sigma_x}) for the given
-        state vector layout (see _section_rhs)."""
+        state vector layout (see _section_rhs).
+
+        ``active`` empty is ambiguous by itself: it means the *original*
+        pure-elastic entry zone (shared bulk sigma_xm/sigma_y, length
+        3+2*ns, y[1] is real) only the first time it happens; once at least
+        one layer has ever been active, an empty active set instead means
+        "every layer individually unloaded back to elastic" - the state is
+        still in the padded, individually-tracked layout (length >= 3+3*ns,
+        y[1] is a dummy pad). Callers past that point must pass
+        ``assume_padded=True`` (see _to_pure_elastic_state)."""
         ns = self.ns
-        if not active:
+        if not active and not assume_padded:
             sigma_xm, sigma_y = y[0], y[1]
             return sigma_y, {i: sigma_xm for i in range(ns)}
         sigma_xm = y[0]
@@ -416,41 +425,42 @@ class LayerPassSection:
         s = self.solver
         ns = self.ns
         active = entry["active_at_xn"]
-        y_xn = entry["state_at_xn"]
-
-        # Re-express entry's end state in the exit-side state layout (same
-        # composition: active plastic set unchanged at the crossing point).
-        y0 = y_xn.copy()
+        y0 = entry["state_at_xn"]
         far_end = self.ld * 1.5
 
         segments = []
         x_current = xn
-        remaining = set(active)
-        for _ in range(ns + 1):
-            if not remaining:
-                break
-            rhs, event = self._exit_rhs_and_event(frozenset(remaining), xn)
-            sol = solve_ivp(
-                rhs, [x_current, far_end], y0, events=event, dense_output=True,
-                rtol=1e-8, atol=1e-6,
-            )
-            x_end = sol.t_events[0][0] if sol.t_events[0].size else far_end
-            xs = np.linspace(x_current, x_end, max(2, int((x_end - x_current) / (self.ld / 100)) + 1))
+
+        if active:
+            # Plastic layers unload back to elastic around the roll gap's
+            # geometric minimum (x=0): dh/dx (hence each active layer's own,
+            # hardness-partitioned share of it) changes sign there from
+            # closing to opening, and plastic flow cannot follow the gap
+            # back open - only elastic recovery can. This is also exactly
+            # the reference implementation's own starting guess for the
+            # exit unload points (``Current[XB] = Table[X2, NS]`` with
+            # X2=0) before its own iterative refinement; using it directly,
+            # unrefined, avoids a stress-based event that (verified
+            # numerically) can't actually detect this transition - an
+            # active layer's own sigma_x is forced to satisfy the Mises
+            # relation exactly by construction, so any margin computed from
+            # it is degenerate and never crosses zero.
+            elastic = [i for i in range(ns) if i not in active]
+
+            def rhs(x, y):
+                return self._section_rhs(x, y, active, elastic, xn, direction=-1)
+
+            sol = solve_ivp(rhs, [x_current, 0.0], y0, dense_output=True, rtol=1e-8, atol=1e-6)
+            xs = np.linspace(x_current, 0.0, max(2, int((0.0 - x_current) / (self.ld / 100)) + 1))
             ys = sol.sol(xs)
-            segments.append((frozenset(remaining), xs, ys))
-            y0 = ys[:, -1]
-            x_current = x_end
-            if not sol.t_events[0].size:
-                remaining = set()
-                break
-            new_remaining = self._shrink_active_set(frozenset(remaining), y0, x_current)
-            y0 = self._reshape_state_for_active(y0, frozenset(remaining), frozenset(new_remaining))
-            remaining = new_remaining
+            segments.append((active, xs, ys))
+            y0 = self._to_pure_elastic_state(ys[:, -1], active)
+            x_current = 0.0
 
         # final elastic recovery zone until separation (sigma_y -> 0)
         rhs, event = self._exit_rhs_and_event(frozenset(), xn, separation_event=True)
         sol = solve_ivp(
-            rhs, [x_current, far_end], self._to_pure_elastic_state(y0, remaining), events=event,
+            rhs, [x_current, far_end], y0, events=event,
             dense_output=True, rtol=1e-8, atol=1e-6,
         )
         x_end = sol.t_events[0][0] if sol.t_events[0].size else far_end
@@ -489,53 +499,60 @@ class LayerPassSection:
             event.direction = 1
             return rhs, event
 
-        if not active:
-            return rhs, None
-
-        def event(x, y, *args):
-            sigma_y, sigma_x_layers = self._decompose_state(y, active, elastic)
-            margins = []
-            for i in active:
-                t_i = y[3 + ns + i]
-                h_i = y[3 + i]
-                phi_v_i = _phi_v(s.h0[i], h_i)
-                kf_i = s.kf(t_i, phi_v_i, self.phi_dot_vm)
-                margins.append((sigma_x_layers[i] - sigma_y) - kf_i)
-            return min(margins)
-
-        event.terminal = True
-        event.direction = -1
-        return rhs, event
-
-    def _shrink_active_set(self, active, y, x):
-        s = self.solver
-        ns = self.ns
-        elastic = [i for i in range(ns) if i not in active]
-        sigma_y, sigma_x_layers = self._decompose_state(y, active, elastic)
-        remaining = set(active)
-        for i in active:
-            t_i = y[3 + ns + i]
-            h_i = y[3 + i]
-            phi_v_i = _phi_v(s.h0[i], h_i)
-            kf_i = s.kf(t_i, phi_v_i, self.phi_dot_vm)
-            if (sigma_x_layers[i] - sigma_y) < kf_i + 1e-6 * max(abs(kf_i), 1.0):
-                remaining.discard(i)
-        return remaining
+        return rhs, None
 
     def _to_pure_elastic_state(self, y, active_still_notionally):
+        """Convert into the original 3+2*ns pure-elastic layout for the
+        final recovery-to-separation zone. ``y`` is either already in that
+        exact layout (no layer ever became active before reaching this
+        point, e.g. a very light reduction) or in the padded,
+        individually-tracked layout (at least one layer was active at some
+        point) - inferred from its length, since an empty
+        ``active_still_notionally`` is ambiguous between "the original
+        pre-yield zone" and "every layer just unloaded" (see
+        _decompose_state)."""
         ns = self.ns
         sigma_xm = y[0]
-        sigma_y = self._sigma_y_of_state(y, frozenset(active_still_notionally))
+        padded = len(y) > 3 + 2 * ns
+        sigma_y = self._sigma_y_of_state(y, frozenset(active_still_notionally), assume_padded=padded)
         sigma_z = (sigma_xm + sigma_y) / 2
         h = y[3:3 + ns]
         t = y[3 + ns:3 + 2 * ns]
         return np.concatenate([[sigma_xm, sigma_y, sigma_z], h, t])
 
-    def _sigma_y_of_state(self, y, active):
+    def _sigma_y_of_state(self, y, active, assume_padded=False):
         ns = self.ns
         elastic = [i for i in range(ns) if i not in active]
-        sigma_y, _ = self._decompose_state(y, active, elastic)
+        sigma_y, _ = self._decompose_state(y, active, elastic, assume_padded=assume_padded)
         return sigma_y
+
+    def _tau_top_of_state(self, x, y, active):
+        """Shear stress at the (representative, top) roll-material interface
+        for reporting - the same mixed Coulomb/stiction law used inside the
+        ODEs (see _section_rhs), evaluated once for an already-computed
+        state rather than as part of a derivative."""
+        s = self.solver
+        ns = self.ns
+        rw = self.rw
+        elastic = [i for i in range(ns) if i not in active]
+
+        alpha = s.alpha_w(x, rw)
+        vx_roll = s.vw(x, rw)
+        vxn = s.vw(self.xn, rw)
+
+        h = y[3:3 + ns]
+        t = y[3 + ns:3 + 2 * ns]
+        sigma_y, _ = self._decompose_state(y, active, elastic)
+
+        phi_v_0 = _phi_v(s.h0[0], h[0])
+        kf_0 = s.kf(t[0], phi_v_0, self.phi_dot_vm)
+
+        h_at_xn = s.h_tot(self.xn, rw)
+        vx_0 = vxn * (h_at_xn * s.h0[0] / s.h0_tot) / h[0]
+
+        tau_sign_top = s._tau_sign(vx_roll, vx_0, vxn)
+        tau_top, _ = s._mixed_friction(sigma_y, kf_0, s.mu_r, alpha, tau_sign_top)
+        return tau_top
 
     def _mean_phi_v_of_state(self, y):
         """Thickness-weighted mean equivalent strain across all ns layers,
@@ -548,16 +565,21 @@ class LayerPassSection:
 
     def _reshape_state_for_active(self, y, old_active, new_active):
         """Re-express a state vector at a zone boundary where the active
-        (plastic) layer set changes, keeping the shared padded layout
-        (SigmaXM, [pad, pad], H(ns), T(ns), SigmaX(elastic layers)) intact
-        so every segment's state vector has a well-defined, consistent
-        length and index meaning regardless of which layers are active."""
+        (plastic) layer set grows (entry-side yielding), keeping the shared
+        padded layout (SigmaXM, [pad, pad], H(ns), T(ns), SigmaX(elastic
+        layers)) intact so every segment's state vector has a well-defined,
+        consistent length and index meaning regardless of which layers are
+        active. A layer newly entering ``active`` needs no special
+        initialization of its own - it has no independent sigma_x DOF once
+        active (see _decompose_state) - only the survivors' existing
+        elastic DOFs need to be picked out and kept in order."""
         ns = self.ns
         sigma_xm = y[0]
         h = y[3:3 + ns]
         t = y[3 + ns:3 + 2 * ns]
         old_elastic = [i for i in range(ns) if i not in old_active]
         _, sigma_x_layers = self._decompose_state(y, frozenset(old_active), old_elastic)
+
         new_elastic = [i for i in range(ns) if i not in new_active]
         new_sigma_x = [sigma_x_layers[i] for i in new_elastic]
         return np.concatenate([[sigma_xm, 0.0, 0.0], h, t, new_sigma_x])
@@ -569,7 +591,8 @@ class LayerPassSection:
 
         State layout:
           - pure elastic (active empty): [SigmaXM, SigmaY, SigmaZ, H(ns), T(ns)]
-          - otherwise: [SigmaXM, H(ns), T(ns), SigmaX(elastic layers, in order)]
+          - otherwise: [SigmaXM, pad, pad, H(ns), T(ns), SigmaX(elastic
+            layers, in order)]
         """
         s = self.solver
         ns = self.ns
@@ -665,14 +688,18 @@ class LayerPassSection:
             d_sigma_z = s.nu_m * (d_sigma_y + d_sigma_xm)
             return np.concatenate([[d_sigma_xm, d_sigma_y, d_sigma_z], dh, dt])
 
-        d_sigma_x_elastic = []
-        for idx, i in enumerate(elastic):
+        def _boundary_terms(i):
             tau_upper = tau_top if i == 0 else inner_tau[i - 1]
             pn_upper = pn_top if i == 0 else inner_pn[i - 1]
             tau_lower = tau_bottom if i == ns - 1 else inner_tau[i]
             pn_lower = pn_bottom if i == ns - 1 else inner_pn[i]
             alpha_upper = alpha if i == 0 else inner_alpha[i - 1]
             alpha_lower = alpha if i == ns - 1 else inner_alpha[i]
+            return tau_upper, pn_upper, tau_lower, pn_lower, alpha_upper, alpha_lower
+
+        d_sigma_x_elastic = []
+        for i in elastic:
+            tau_upper, pn_upper, tau_lower, pn_lower, alpha_upper, alpha_lower = _boundary_terms(i)
             sigma_x_i = sigma_x_layers[i]
             dsx = -(sigma_x_i * dh[i] + tau_upper - tau_lower - pn_upper * np.tan(alpha_upper) + pn_lower * np.tan(alpha_lower)) / h[i]
             d_sigma_x_elastic.append(dsx)
@@ -710,7 +737,7 @@ class LayerPassSection:
                     sigma_y = self._sigma_y_of_state(ys[:, k], active)
                     rows_x.append(x)
                     rows_p.append(-sigma_y)
-                    rows_tau.append(0.0)
+                    rows_tau.append(self._tau_top_of_state(x, ys[:, k], active))
                     rows_strain.append(self._mean_phi_v_of_state(ys[:, k]))
         order = np.argsort(rows_x)
         x_arr = np.array(rows_x)[order]
