@@ -38,15 +38,23 @@ the "bottom" roll; the two roll contacts are boundaries ``0`` and
 Each pass starts every layer from the incoming ``Profile``'s own scalar
 strain/temperature (uniform across layers) - ``pyroll-core`` has no native
 concept of a through-thickness state to carry from one pass to the next.
-Note this means the *entry* elastic zone has no mechanism to break symmetry
-between layers (matching the reference implementation, which defines but
-never wires in an Ekelund-type redundant-shear correction - marked
-``TODO: Scherung einfließen lassen`` in the source): under uniform incoming
-layers all layers reach yield at the same position. Layers still genuinely
-diverge from there on, since only the outermost layers feel roll-contact
-friction directly while inner layers only feel the (weaker) inner-friction
-law, and the resulting temperature/flow-stress differences compound through
-the rest of the pass.
+Even so, layers plastify in genuine sequence rather than all at once
+("Schmiedekreuz"/forging-cross effect): every layer tracks its *own*
+independent horizontal-stress DOF from the very start of contact (``x0``),
+not just after some layer first yields, because only the outermost layers
+feel roll-contact friction directly (coefficient ``coulomb_friction_coefficient``
+/ ``friction_stiction_coefficient``) while inner layers only feel the fixed,
+near-full-sticking inner-friction law (``MU_R_INNER``, equivalent to a
+stiction coefficient of 1) on *both* their boundaries - so their stress
+states diverge, and cross the yield surface at different roll-gap
+positions, before any of them yields. Which layers yield first depends on
+how the outer roll friction compares to the fixed inner one: with a
+moderate-to-high roll friction and light reductions this can still mean
+the surface layers lead (the classic Schmiedekreuz picture), but because
+``MU_R_INNER`` is fixed at the sticking limit, inner layers - which have
+*two* such boundaries against the surface layers' one - are just as often
+found to yield first in practice; this is an emergent property of the
+ported model's fixed inner-friction assumption, not tuned or asserted here.
 """
 
 import logging
@@ -304,8 +312,17 @@ class LayerPassSection:
         s = self.solver
         ns = self.ns
 
-        # --- pure-elastic zone: whole stack as one elastic body ---
-        y0 = np.concatenate([[s.back_tension, 0.0, (s.back_tension + 0.0) / 2], s.h0.copy(), s.t0.copy()])
+        # --- pure-elastic zone: each layer already tracks its own sigma_x
+        # (see _section_rhs's "not active" branch), so layers can diverge
+        # from x0 due to their own boundary friction, before any of them
+        # yields - not just after (the "Schmiedekreuz"/forging-cross effect:
+        # surface layers plastify before the core even under uniform
+        # incoming layers, since only they feel roll-contact friction
+        # directly while inner layers feel the weaker inner-friction law).
+        y0 = np.concatenate([
+            [s.back_tension, 0.0, (s.back_tension + 0.0) / 2], s.h0.copy(), s.t0.copy(),
+            np.full(ns, s.back_tension),
+        ])
         active = frozenset()
 
         segments = []
@@ -352,6 +369,13 @@ class LayerPassSection:
             return rhs, None
 
         def event(x, y, *args):
+            # Fire as soon as the CLOSEST-to-yield elastic layer reaches the
+            # Mises boundary (max margin, not min): tracking the min would
+            # instead require the SAFEST layer to reach zero first, by which
+            # point every closer-to-yield layer has already overshot past
+            # zero under the (deliberately non-physical past yield) elastic
+            # extrapolation - masking genuinely sequential yielding as one
+            # simultaneous jump.
             sigma_y, sigma_x_layers = self._decompose_state(y, active, elastic)
             margins = []
             for idx, i in enumerate(elastic):
@@ -359,7 +383,7 @@ class LayerPassSection:
                 phi_v_i = _phi_v(s.h0[i], y[3 + i])
                 kf_i = s.kf(t_i, phi_v_i, self.phi_dot_vm)
                 margins.append((sigma_x_layers[i] - sigma_y) - 2 / np.sqrt(3) * kf_i)
-            return min(margins) if margins else 1.0
+            return max(margins) if margins else 1.0
 
         event.terminal = True
         event.direction = 1
@@ -379,27 +403,25 @@ class LayerPassSection:
                 new_active.add(i)
         return frozenset(new_active) if new_active else active
 
-    def _decompose_state(self, y, active, elastic, assume_padded=False):
+    def _decompose_state(self, y, active, elastic):
         """Return (sigma_y, {layer index -> its own sigma_x}) for the given
         state vector layout (see _section_rhs).
 
-        ``active`` empty is ambiguous by itself: it means the *original*
-        pure-elastic entry zone (shared bulk sigma_xm/sigma_y, length
-        3+2*ns, y[1] is real) only the first time it happens; once at least
-        one layer has ever been active, an empty active set instead means
-        "every layer individually unloaded back to elastic" - the state is
-        still in the padded, individually-tracked layout (length >= 3+3*ns,
-        y[1] is a dummy pad). Callers past that point must pass
-        ``assume_padded=True`` (see _to_pure_elastic_state)."""
+        Every not-yet-active ("elastic") layer has its own tracked sigma_x
+        DOF regardless of whether *any* layer is active yet - this is what
+        lets layers diverge, and yield in sequence, even under uniform
+        incoming conditions (see module docstring). ``active`` empty is
+        therefore unambiguous: it just means no layer has plastified (yet,
+        on entry; or any more, on exit's final recovery zone), and sigma_y
+        is a genuinely tracked DOF at y[1] rather than derived."""
         ns = self.ns
-        if not active and not assume_padded:
-            sigma_xm, sigma_y = y[0], y[1]
-            return sigma_y, {i: sigma_xm for i in range(ns)}
         sigma_xm = y[0]
         sigma_x_layers = {}
         offset = 3 + 2 * ns
         for idx, i in enumerate(elastic):
             sigma_x_layers[i] = y[offset + idx]
+        if not active:
+            return y[1], sigma_x_layers
         # sigma_y from mean-Mises over ALL ns layers (elastic and plastic
         # alike, each with its own current H/T), per the reference's
         # MisesMean - not just the active (plastic) subset. For ns=1 this
@@ -502,28 +524,27 @@ class LayerPassSection:
         return rhs, None
 
     def _to_pure_elastic_state(self, y, active_still_notionally):
-        """Convert into the original 3+2*ns pure-elastic layout for the
-        final recovery-to-separation zone. ``y`` is either already in that
-        exact layout (no layer ever became active before reaching this
-        point, e.g. a very light reduction) or in the padded,
-        individually-tracked layout (at least one layer was active at some
-        point) - inferred from its length, since an empty
-        ``active_still_notionally`` is ambiguous between "the original
-        pre-yield zone" and "every layer just unloaded" (see
-        _decompose_state)."""
+        """Convert from the active (some layers still Mises-forced) layout
+        into the "not active" layout - still with every layer's own sigma_x
+        tracked (see _section_rhs), just with sigma_y newly a real,
+        independent DOF instead of Mises-derived. Only ever called with a
+        non-empty ``active_still_notionally`` (the layers still plastic
+        right before this final recovery-to-separation zone)."""
         ns = self.ns
         sigma_xm = y[0]
-        padded = len(y) > 3 + 2 * ns
-        sigma_y = self._sigma_y_of_state(y, frozenset(active_still_notionally), assume_padded=padded)
+        active = frozenset(active_still_notionally)
+        elastic = [i for i in range(ns) if i not in active]
+        sigma_y, sigma_x_layers = self._decompose_state(y, active, elastic)
         sigma_z = (sigma_xm + sigma_y) / 2
         h = y[3:3 + ns]
         t = y[3 + ns:3 + 2 * ns]
-        return np.concatenate([[sigma_xm, sigma_y, sigma_z], h, t])
+        new_sigma_x = [sigma_x_layers[i] for i in range(ns)]
+        return np.concatenate([[sigma_xm, sigma_y, sigma_z], h, t, new_sigma_x])
 
-    def _sigma_y_of_state(self, y, active, assume_padded=False):
+    def _sigma_y_of_state(self, y, active):
         ns = self.ns
         elastic = [i for i in range(ns) if i not in active]
-        sigma_y, _ = self._decompose_state(y, active, elastic, assume_padded=assume_padded)
+        sigma_y, _ = self._decompose_state(y, active, elastic)
         return sigma_y
 
     def _tau_top_of_state(self, x, y, active):
@@ -589,10 +610,13 @@ class LayerPassSection:
     def _section_rhs(self, x, y, active, elastic, xn, direction):
         """RHS for a section with a fixed active (plastic) layer set.
 
-        State layout:
-          - pure elastic (active empty): [SigmaXM, SigmaY, SigmaZ, H(ns), T(ns)]
-          - otherwise: [SigmaXM, pad, pad, H(ns), T(ns), SigmaX(elastic
-            layers, in order)]
+        State layout, always: [SigmaXM, SigmaY-or-pad, SigmaZ-or-pad, H(ns),
+        T(ns), SigmaX(elastic layers, in order)] - "elastic" meaning
+        "not yet active", which is *all* ns layers before any of them have
+        plastified. SigmaY/SigmaZ (indices 1, 2) are real, independently
+        tracked DOFs only while no layer is active; once any layer is
+        active, sigma_y is instead derived from the Mises-mean condition
+        (see _decompose_state) and those two slots are unused padding.
         """
         s = self.solver
         ns = self.ns
@@ -604,15 +628,10 @@ class LayerPassSection:
         vx_roll = s.vw(x, rw)
         vxn = s.vw(xn, rw)
 
-        if not active:
-            sigma_xm, sigma_y, sigma_z = y[0], y[1], y[2]
-            h = y[3:3 + ns]
-            t = y[3 + ns:3 + 2 * ns]
-        else:
-            sigma_xm = y[0]
-            h = y[3:3 + ns]
-            t = y[3 + ns:3 + 2 * ns]
-            sigma_y, sigma_x_layers = self._decompose_state(y, active, elastic)
+        sigma_xm = y[0]
+        h = y[3:3 + ns]
+        t = y[3 + ns:3 + 2 * ns]
+        sigma_y, sigma_x_layers = self._decompose_state(y, active, elastic)
 
         phi_v = _phi_v(s.h0, h)
         kf_layers = np.array([s.kf(t[i], phi_v[i], self.phi_dot_vm) for i in range(ns)])
@@ -624,7 +643,16 @@ class LayerPassSection:
         tau_sign_top = s._tau_sign(vx_roll, vx_layers[0], vxn)
         tau_sign_bottom = s._tau_sign(vx_layers[-1], vx_roll, vxn)
         tau_top, pn_top = s._mixed_friction(sigma_y, kf_layers[0], s.mu_r, alpha, tau_sign_top)
-        tau_bottom, pn_bottom = s._mixed_friction(sigma_y, kf_layers[-1], s.mu_r, alpha, tau_sign_bottom)
+        # Bottom roll surface: -alpha, not alpha - its own local slope is the
+        # negative of the top's (Y = -h_tot/2 vs Y = +h_tot/2), so this is the
+        # same "-(dY/dx) of this boundary's own y-position" convention used
+        # for inner_alpha and the per-layer _boundary_terms below. Combined
+        # with tau_sign_bottom's own sign (from the opposite vx_upper/vx_lower
+        # argument order), this makes pn_bottom == pn_top and
+        # tau_bottom == -tau_top under symmetric conditions, exactly as the
+        # d_sigma_xm formula below already assumes (tau_top - tau_bottom,
+        # -pn_top*tan(alpha) - pn_bottom*tan(alpha)).
+        tau_bottom, pn_bottom = s._mixed_friction(sigma_y, kf_layers[-1], s.mu_r, -alpha, tau_sign_bottom)
 
         d_sigma_xm = -(sigma_xm * dhtot + tau_top - tau_bottom - pn_top * np.tan(alpha) - pn_bottom * np.tan(alpha)) / htot
 
@@ -681,28 +709,43 @@ class LayerPassSection:
             denom = s.density * s.heat_capacity * vxn * h_rigid_at_xn[i]
             dt[i] = numerator / denom
 
-        if not active:
-            d_eps_y = dhtot / s.h0_tot
-            em_mean = 1 / np.sum((s.h0 / s.h0_tot) / s.em)
-            d_sigma_y = em_mean / (1 - s.nu_m ** 2) * d_eps_y + s.nu_m / (1 - s.nu_m) * d_sigma_xm
-            d_sigma_z = s.nu_m * (d_sigma_y + d_sigma_xm)
-            return np.concatenate([[d_sigma_xm, d_sigma_y, d_sigma_z], dh, dt])
-
         def _boundary_terms(i):
+            # alpha_lower at the bottom roll surface (i == ns - 1) is the
+            # NEGATIVE of the top's alpha here too, for the same reason
+            # tau_bottom/pn_bottom's own computation above already uses
+            # -alpha: this boundary's own local slope (Y = -h_tot/2) is the
+            # negative of the top's (Y = +h_tot/2) by symmetry. Confirmed by
+            # requiring this per-layer equation reduce to the standard
+            # aggregate form when ns=1 (upper=lower boundary values): that
+            # only holds with alpha_lower=-alpha.
             tau_upper = tau_top if i == 0 else inner_tau[i - 1]
             pn_upper = pn_top if i == 0 else inner_pn[i - 1]
             tau_lower = tau_bottom if i == ns - 1 else inner_tau[i]
             pn_lower = pn_bottom if i == ns - 1 else inner_pn[i]
             alpha_upper = alpha if i == 0 else inner_alpha[i - 1]
-            alpha_lower = alpha if i == ns - 1 else inner_alpha[i]
+            alpha_lower = -alpha if i == ns - 1 else inner_alpha[i]
             return tau_upper, pn_upper, tau_lower, pn_lower, alpha_upper, alpha_lower
 
+        # Every not-yet-active ("elastic") layer has its own tracked sigma_x
+        # DOF and its own boundary tau/pn (roll-contact friction for the
+        # outermost layers, the weaker inner-friction law for inner ones),
+        # so this is shared between the pure pre-yield zone (elastic == all
+        # ns layers) and the mixed zones (elastic == the not-yet-active
+        # subset) - the mechanism that lets layers diverge, and yield in
+        # sequence, from x0 onward (see module docstring).
         d_sigma_x_elastic = []
         for i in elastic:
             tau_upper, pn_upper, tau_lower, pn_lower, alpha_upper, alpha_lower = _boundary_terms(i)
             sigma_x_i = sigma_x_layers[i]
             dsx = -(sigma_x_i * dh[i] + tau_upper - tau_lower - pn_upper * np.tan(alpha_upper) + pn_lower * np.tan(alpha_lower)) / h[i]
             d_sigma_x_elastic.append(dsx)
+
+        if not active:
+            d_eps_y = dhtot / s.h0_tot
+            em_mean = 1 / np.sum((s.h0 / s.h0_tot) / s.em)
+            d_sigma_y = em_mean / (1 - s.nu_m ** 2) * d_eps_y + s.nu_m / (1 - s.nu_m) * d_sigma_xm
+            d_sigma_z = s.nu_m * (d_sigma_y + d_sigma_xm)
+            return np.concatenate([[d_sigma_xm, d_sigma_y, d_sigma_z], dh, dt, d_sigma_x_elastic])
 
         return np.concatenate([[d_sigma_xm, 0.0, 0.0], dh, dt, d_sigma_x_elastic])
 
