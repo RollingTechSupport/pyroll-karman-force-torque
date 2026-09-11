@@ -1,24 +1,35 @@
-"""Orowan's slab-theory solution for flat rolling.
+"""Von-Kármán slab theory with a mixed Coulomb/sticking friction law.
 
 Generalizes :class:`.karman_solver.KarmanSolver`'s von-Kármán slab method
-with Orowan's refinement (Orowan, "The Calculation of Roll Pressure in Hot
-and Cold Flat Rolling", Proc. IMechE 150, 1943): a mixed Coulomb/sticking
-friction law (here, Bay & Wanheim's smoothed version of it, matching
-:mod:`.layer_solver`) instead of pure Coulomb friction throughout. Plain
-Coulomb friction, integrated all the way to the roll gap center, produces
-an unbounded pressure spike once the friction hill would demand more shear
-traction than the material can actually transmit; Orowan's mixed law caps
-it at the material's sticking (shear-yield) limit instead, which is what
-actually happens once passes get thick enough (or friction high enough)
-for pure Coulomb to become unrealistic.
+with a mixed Coulomb/sticking friction law, following Bay & Wanheim's
+smoothed formulation of it (Bay & Wanheim, "Real area of contact and
+friction stresses at high pressure sliding contact", Wear 38, 1976 -
+the same law :mod:`.layer_solver` uses per-layer), instead of pure Coulomb
+friction throughout. Plain Coulomb friction, integrated all the way to the
+roll gap center, produces an unbounded pressure spike once the friction
+hill would demand more shear traction than the material can actually
+transmit; the mixed law caps it at the material's sticking (shear-yield)
+limit instead, which is what actually happens once passes get thick enough
+(or friction high enough) for pure Coulomb to become unrealistic.
+
+Note this is *not* Orowan's own 1943 slab theory (Orowan, "The Calculation
+of Roll Pressure in Hot and Cold Flat Rolling", Proc. IMechE 150, 1943),
+which is a substantially different and more involved model: it replaces
+the straight strip-element boundaries with circular arcs (centered on the
+roll-gap symmetry line, meeting the roll surfaces at right angles) and an
+inhomogeneity function correcting for genuinely non-uniform through-
+thickness deformation, rather than a friction-law refinement on top of the
+same strip-element geometry. This solver only reuses Orowan's namesake
+insight that pure Coulomb friction becomes unrealistic once passes are
+thick or high-friction enough - the actual mechanism here (mixed
+Coulomb/sticking friction) is Bay & Wanheim's, not Orowan's.
 
 Like :class:`.karman_solver.KarmanSolver` (and unlike
 :class:`.layer_solver.LayerRollingSolver` or
 :class:`.foil_solver.FoilRollingSolver`), this solver is rigid-plastic: no
-elastic entry/exit zones and no thermal coupling. Orowan's own 1943 theory
-predates elastic-plastic slab refinements; those are a separate axis
-(covered here by the layer model) from the friction-law refinement Orowan
-himself introduced.
+elastic entry/exit zones and no thermal coupling - those are a separate
+axis (covered here by the layer model) from the friction-law refinement
+this solver adds.
 
 This solver is used for the "medium" dispatch tier (see ``roll_pass.py``),
 in place of ``LayerRollingSolver(layer_count=1)``: it keeps the simplicity
@@ -49,9 +60,10 @@ def bay_wanheim_coulomb_from_stiction(stiction_coefficient: float) -> float:
     return m / (1 + np.pi / 2 + np.arccos(m) + np.sqrt(1 - m ** 2))
 
 
-class OrowanSolver:
-    """Rigid-plastic slab-theory solution of a flat roll pass with Orowan's
-    mixed Coulomb/sticking friction law - see module docstring.
+class KarmanMixedFrictionSolver:
+    """Rigid-plastic von-Kármán slab-theory solution of a flat roll pass
+    with Bay & Wanheim's mixed Coulomb/sticking friction law - see module
+    docstring (and note there on why this isn't Orowan's own theory).
 
     Provides the same public attributes as :class:`.karman_solver.KarmanSolver`
     (``roll_force_per_unit_width``, ``roll_torque_per_unit_width``,
@@ -178,7 +190,7 @@ class OrowanSolver:
             horizontal_stress += horizontal_stress_change * step_width_with_direction
             position += step_width_with_direction
 
-        log.debug("Finished solution of Orowan slab ODE.")
+        log.debug("Finished solution of mixed-friction slab ODE.")
         return pd.DataFrame.from_dict(stepwise_solution_storage, orient="index")
 
     def return_roll_force_per_unit_width(self):

@@ -3,10 +3,10 @@ from pyroll.karman_force_torque.condition import contact_length_over_mean_thickn
 from pyroll.karman_force_torque.foil_solver import FoilRollingSolver
 from pyroll.karman_force_torque.karman_solver import KarmanSolver
 from pyroll.karman_force_torque.layer_solver import LayerRollingSolver
-from pyroll.karman_force_torque.orowan_solver import OrowanSolver
+from pyroll.karman_force_torque.karman_mixed_friction_solver import KarmanMixedFrictionSolver
 
 RollPass.karman_solution = Hook[object]()
-"""Solution values of the pass (one of KarmanSolver, OrowanSolver,
+"""Solution values of the pass (one of KarmanSolver, KarmanMixedFrictionSolver,
 LayerRollingSolver or FoilRollingSolver, chosen automatically - see
 karman_solution's hookimpl)."""
 
@@ -23,7 +23,7 @@ RollPass.thick_slab_condition = Hook[bool]()
 """Whether the pass is thick enough that through-thickness deformation can no
 longer be treated as homogeneous (contact length / mean thickness < limit),
 requiring the multi-layer elastic-plastic model instead of the rigid-plastic
-Orowan ("medium") one."""
+mixed-friction ("medium") one."""
 
 RollPass.layer_model_ld_hm_limit = Hook[float]()
 """Contact-length / mean-thickness ratio (Ld/Hm) below which the multi-layer
@@ -36,7 +36,7 @@ thick-slab path (default 5, matching the reference implementation)."""
 
 RollPass.friction_stiction_coefficient = Hook[float]()
 """Stiction (sticking) friction coefficient feeding the Bay/Wanheim conversion
-to an equivalent Coulomb coefficient, used by OrowanSolver and
+to an equivalent Coulomb coefficient, used by KarmanMixedFrictionSolver and
 LayerRollingSolver's mixed friction laws (default 0.8)."""
 
 RollPass.roll_heat_transfer_coefficient = Hook[float]()
@@ -113,7 +113,7 @@ def karman_solution(self: RollPass):
         return FoilRollingSolver(roll_pass=self)
     if self.thick_slab_condition:
         return LayerRollingSolver(roll_pass=self, layer_count=self.layer_model_layer_count)
-    return OrowanSolver(roll_pass=self)
+    return KarmanMixedFrictionSolver(roll_pass=self)
 
 
 @RollPass.InProfile.velocity
