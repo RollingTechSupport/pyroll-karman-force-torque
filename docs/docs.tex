@@ -203,6 +203,36 @@
     \end{table}
 
 
+    \section{Comparison of the models}\label{sec:comparison}
+
+    Because \lstinline{KarmanMixedFrictionSolver}, \lstinline{LayerRollingSolver} and \lstinline{OrowanSolver} all integrate the same equilibrium equation (\autoref{eq:karman-elem}) with the same mixed friction law (\autoref{eq:mixed-friction}), differing only in their $\sigma_x$/$\sigma_y$ closure and (for the layer model) through-thickness resolution, they can be run side by side on the same pass and compared directly - unlike \lstinline{FoilRollingSolver}, whose elastic roll-gap contour only differs meaningfully from a rigid one once $r'/r \geq 2$ (\autoref{sec:dispatch}), well outside the gauge range the other three are meant for.
+
+    \autoref{tab:model-comparison} and \autoref{fig:model-comparison} compare all four on the same representative hot-rolling pass ($h_0=\SI{15}{mm}$, gap \SI{12}{mm}, work-roll radius \SI{160}{mm}, $\mu=0.35$, constant $k_f=\SI{100}{MPa}$, no tension) - the same pass used in this plugin's own test suite. All four agree on roll force to within about $10\%$ and on the friction-hill shape (\autoref{fig:model-comparison}): \lstinline{OrowanSolver} predicts a somewhat lower peak pressure and force than \lstinline{KarmanMixedFrictionSolver}, since its inhomogeneity function $\omega_O$ (\autoref{eq:omega-orowan}) is $\leq 1$ and so only ever reduces the Mises offset relative to the plain closure; \lstinline{LayerRollingSolver} with a single layer ($N=1$) falls in between, close to but not identical to \lstinline{KarmanMixedFrictionSolver}, since it is a materially different implementation (thermally coupled, its own elastic-plastic constitutive formulation) that happens to collapse to the same physical limit rather than sharing code with it (\autoref{sec:mixed-friction-model}); and \lstinline{LayerRollingSolver} with five layers ($N=5$) sits close to its own $N=1$ result, as expected since this particular pass is not actually in the thick-slab regime ($L_d/H_m$ comfortably above the default limit of $1$) - the layer count only matters once through-thickness deformation is genuinely inhomogeneous.
+
+    \begin{table}
+        \centering
+        \caption{Solver outputs for the same representative hot-rolling pass.}
+        \label{tab:model-comparison}
+        \begin{tabular}{@{}lrrrr@{}}
+            \toprule
+            Model & Force (kN/m) & Torque (kN) & $x_n$ (mm) & Peak $p_N$ (MPa) \\
+            \midrule
+            \texttt{Karman\-Mixed\-Friction\-Solver} & 3365 & 34.7 & $-8.15$ & 187.9 \\
+            \texttt{Orowan\-Solver} & 3038 & 31.5 & $-8.25$ & 165.6 \\
+            \texttt{Layer\-Rolling\-Solver} ($N=1$) & 3237 & 33.6 & $-8.44$ & 168.6 \\
+            \texttt{Layer\-Rolling\-Solver} ($N=5$) & 3194 & 33.3 & $-10.46$ & 163.4 \\
+            \bottomrule
+        \end{tabular}
+    \end{table}
+
+    \begin{figure}
+        \centering
+        \includegraphics[width=0.75\linewidth]{img/solver-comparison-pressure}
+        \caption{Normal-pressure distribution across the roll gap for the same pass as \autoref{tab:model-comparison}, comparing \texttt{KarmanMixedFrictionSolver}, \texttt{OrowanSolver} and \texttt{LayerRollingSolver} ($N=1$).}
+        \label{fig:model-comparison}
+    \end{figure}
+
+
     \section{Usage instructions}\label{sec:usage-instructions}
     The plugin can be loaded under the name \texttt{pyroll\_karman\_power\_and\_labour}.
 
