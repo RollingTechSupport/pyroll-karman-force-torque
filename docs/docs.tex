@@ -128,6 +128,44 @@
 
     All three limits are themselves hooks (\autoref{tab:hookspecs}) and can be overridden per pass, including forcing a particular model unconditionally. \lstinline{KarmanMixedFrictionSolver} does not itself need the elastic properties or thermal data the other refinements do, but is kept behind the same elastic-properties gate as step 1 for consistency, rather than being dispatched independently of it.
 
+    \autoref{tab:model-overview} summarizes all five models by their underlying stress-strain treatment, friction law, and the thickness regime each is intended for - the four dispatched automatically by the criteria above, plus \lstinline{OrowanSolver} (\autoref{sec:orowan-model}), which is not.
+
+    \begin{table}
+        \centering
+        \caption{Overview of stress-strain and friction models, with recommended thickness regime.}
+        \label{tab:model-overview}
+        \begin{tabular}{@{}p{0.15\linewidth}p{0.24\linewidth}p{0.17\linewidth}p{0.36\linewidth}@{}}
+            \toprule
+            Model & Stress-strain model & Friction model & Recommended regime \\
+            \midrule
+            \texttt{Karman\-Solver} &
+            rigid-plastic, homogeneous cross-section &
+            pure Coulomb &
+            fallback only - used whenever \texttt{elas\-tic\_mod\-ulus}/\texttt{pois\-sons\_ra\-tio} are not set, at any thickness; superseded by one of the other four the moment elastic data is available \\
+            \addlinespace
+            \texttt{Karman\-Mixed\-Friction\-Solver} &
+            rigid-plastic, homogeneous cross-section &
+            Bay/Wanheim mixed Coulomb/sticking &
+            medium gauge: $r'/r < 2$ (default) and $L_d/H_m \geq 1$ (default) - the plugin's default once elastic data is present and neither condition below triggers \\
+            \addlinespace
+            \texttt{Layer\-Rolling\-Solver} &
+            elastic-plastic, $N$ through-thickness layers, full thermal coupling &
+            Bay/Wanheim mixed (roll contact \& inter-layer) &
+            thick slabs: $L_d/H_m < 1$ (default), i.e.\ contact length small relative to mean thickness, and $r'/r < 2$ \\
+            \addlinespace
+            \texttt{Foil\-Rolling\-Solver} &
+            elastic-plastic, homogeneous cross-section, elastic (non-circular) roll-gap contour &
+            Coulomb with optional sticking zone &
+            foil rolling: $r'/r \geq 2$ (default). Governed by $r'/r$, not gauge alone - force and roll stiffness matter too, so no fixed absolute thickness applies (our own 0.5\,mm-to-0.2\,mm steel-foil case needed a small roll radius and tuned friction/tension to actually reach $r'/r \geq 2$; industrial foils are typically well under 0.1\,mm) \\
+            \addlinespace
+            \texttt{Orowan\-Solver} &
+            elastic-plastic, single homogeneous cross-section, circular-arc inhomogeneity correction &
+            sticking only &
+            not gated by $L_d/H_m$ or $r'/r$ - always selected explicitly (\autoref{sec:usage-instructions}). Recommended for hot passes (scale/oxide, high temperature) where sticking dominates across the whole contact, typically overlapping the medium-to-thick gauge range as a hot-rolling alternative to \texttt{Karman\-Mixed\-Friction\-Solver}/\texttt{Layer\-Rolling\-Solver} \\
+            \bottomrule
+        \end{tabular}
+    \end{table}
+
 
     \section{Orowan's (1943) hot-rolling model}\label{sec:orowan-model}
 
