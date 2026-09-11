@@ -20,23 +20,51 @@ the slab the way the mixed-friction and layer models both still do (even
 the layer model's per-layer split is a coarse discretization, not the same
 mechanism).
 
-This solver only implements the **sticking-friction branch**, Orowan's
-Gl. (4.4/6) (Haftreibung), applied throughout the contact - appropriate for
-hot rolling, where scale/oxide layers and high temperature typically make
-sticking friction the realistic assumption across the whole arc, per the
-user's own request. Orowan's general theory also has a sliding-friction
-branch, Gl. (4.4/5) (Gleitreibung), with a friction-ratio-dependent
-a_O = 2*mu*sigma_N/kf in [0, 1] blending between the two; that branch, and
-the resulting need to locate where the contact switches from sliding to
-sticking, is not implemented here.
+This solver implements Orowan's **sticking-friction branch**, Gl. (4.4/6)
+(Haftreibung) - appropriate for hot rolling, where scale/oxide layers and
+high temperature typically make sticking friction the realistic assumption
+across the whole arc - as ``friction_model="sticking"`` (the default), and
+a second, ``friction_model="mixed"`` option layering Bay & Wanheim's mixed
+Coulomb/sticking law (the same law :class:`.karman_mixed_friction_solver.KarmanMixedFrictionSolver`
+and :class:`.layer_solver.LayerRollingSolver` use) on top of Orowan's
+inhomogeneity correction, for passes where friction is not high enough for
+sticking to hold across the whole contact.
+
+Orowan's own general theory has a sliding-friction branch, Gl. (4.4/5)
+(Gleitreibung), with its own friction-ratio parameter
+a_O = 2*mu*sigma_N/kf in [0, 1] blending between sliding and sticking
+*within his own inhomogeneity-function formalism*. ``friction_model="mixed"``
+does **not** implement that branch - it instead keeps Gl. (4.4/6)'s
+structure (so the geometric correction term and the flow-stress convention
+are unchanged) and generalizes only the inhomogeneity function itself: the
+sticking-limit value omega_O(alpha, 1) (see ``omega_orowan_sticking``) is
+linearly blended toward the frictionless limit omega_O -> 1 using Bay &
+Wanheim's own smooth Coulomb/sticking transition variable Phi (the same
+Phi computed inside the mixed friction law, reused rather than duplicated),
+i.e. omega_O_eff = (1-Phi) + Phi*omega_O(alpha,1). This is a deliberate,
+pragmatic hybrid - not a rederivation of Gl. (4.4/5) - chosen because
+omega_O is documented as only weakly dependent on its arguments (see
+below), so a linear interpolation between its two known closed-form
+endpoints, weighted by the same regime indicator already driving the
+friction law, is a reasonable approximation without needing the general,
+quadrature-only omega_O(alpha, a_O) for a_O != 0, 1.
 
 Elastic entry and exit zones (Hooke's law, same construction as
 :class:`.layer_solver.LayerRollingSolver`'s ``layer_count=1`` case) bound
 the Orowan-plastic zone on both sides, exactly as requested - unlike
 Orowan's own 1943 paper (and the mixed-friction/layer models here so far),
-which are rigid-plastic or use a much simpler elastic treatment. Thermal
-coupling is out of scope here (like :class:`.karman_solver.KarmanSolver`
-and :class:`.karman_mixed_friction_solver.KarmanMixedFrictionSolver` - a
+which are rigid-plastic or use a much simpler elastic treatment. With
+``friction_model="sticking"``, the elastic zones carry no friction at all
+(sigma_x held fixed at the boundary tension): applying full sticking
+friction from the first point of contact, where normal pressure is still
+essentially zero, blows the stress up immediately (verified: it does,
+badly) - friction there is only ever meaningful once real contact pressure
+develops. ``friction_model="mixed"`` does not have this problem (Bay &
+Wanheim's law is well-behaved as pressure -> 0, tapering smoothly rather
+than saturating), so its elastic zones carry the same mixed friction as
+the plastic zone. Thermal coupling is out of scope here (like
+:class:`.karman_solver.KarmanSolver` and
+:class:`.karman_mixed_friction_solver.KarmanMixedFrictionSolver` - a
 separate axis, already covered by the layer model): flow stress is
 evaluated at the incoming profile's own scalar temperature throughout.
 
@@ -70,8 +98,9 @@ model beyond qualitative use:
   implementation substitutes kf_orowan = 2 * kf_pyroll throughout, chosen
   specifically so that Gl. (4.4/6) reduces to the ordinary
   sigma_x - sigma_N = -2*kf/sqrt(3) Mises relation in the frictionless
-  limit (which is consistent for the a_O-dependent Gl. 4.4/5, though not
-  exercised by this sticking-only solver).
+  limit - relevant to ``friction_model="mixed"`` too (see below), which
+  approaches that same limit as friction drops toward the Coulomb-only
+  regime.
 - **The entry/exit sign of the (1/alpha - 1/tan(alpha)) geometric term in
   Gl. (4.4/6) is a best-effort reconstruction.** The source prints it as
   "∓" without the surrounding context needed to pin down which sign
@@ -102,6 +131,8 @@ from scipy.optimize import brentq
 from scipy.special import jv
 
 from pyroll.core import RollPass
+
+from pyroll.karman_force_torque.karman_mixed_friction_solver import bay_wanheim_coulomb_from_stiction
 
 log = logging.getLogger(__name__)
 
@@ -138,8 +169,11 @@ def _geometric_correction(alpha: float) -> float:
 
 
 class OrowanSolver:
-    """Orowan's (1943) slab theory for hot rolling, sticking friction
-    throughout, with elastic entry/exit zones - see module docstring.
+    """Orowan's (1943) slab theory for hot rolling, with elastic entry/exit
+    zones - see module docstring. ``friction_model="sticking"`` (default)
+    is Orowan's own Gl. (4.4/6) throughout; ``friction_model="mixed"``
+    layers Bay & Wanheim's mixed Coulomb/sticking law on top of it instead
+    (see module docstring for exactly how the two are combined).
 
     Provides the same public attributes as the other solvers in this
     plugin (``roll_force_per_unit_width``, ``roll_torque_per_unit_width``,
@@ -147,8 +181,12 @@ class OrowanSolver:
     ``solution``).
     """
 
-    def __init__(self, roll_pass: RollPass):
+    def __init__(self, roll_pass: RollPass, friction_model: str = "sticking", pressure_smoothness: float = 0.1):
+        if friction_model not in ("sticking", "mixed"):
+            raise ValueError(f"friction_model must be 'sticking' or 'mixed', got {friction_model!r}")
         self.roll_pass = roll_pass
+        self.friction_model = friction_model
+        self.pressure_smoothness = pressure_smoothness
         self._setup()
         self._solve()
         self._finalize()
@@ -163,6 +201,14 @@ class OrowanSolver:
         self.nominal_radius = roll.working_radius
         self.gap = rp.gap
         self.rotational_frequency = roll.rotational_frequency
+
+        if self.friction_model == "mixed":
+            self.mr = rp.friction_stiction_coefficient
+            self.mu_r = (
+                rp.coulomb_friction_coefficient
+                if rp.has_set_or_cached("coulomb_friction_coefficient")
+                else bay_wanheim_coulomb_from_stiction(self.mr)
+            )
 
         self.nu_m = profile.poissons_ratio
         self.em = profile.elastic_modulus
@@ -255,12 +301,46 @@ class OrowanPassSection:
         codebase's convention while sigma_N alone got the sign flip - that
         is inconsistent and was caught because it produced a normal
         pressure that *decreased* from entry into the plastic zone instead
-        of forming the expected friction hill.)"""
+        of forming the expected friction hill.)
+
+        Dispatches to the mixed-friction variant (module docstring) when
+        ``friction_model="mixed"``."""
+        if self.solver.friction_model == "mixed":
+            return self._orowan_sigma_y_mixed(sigma_x, alpha, kf_val, zone)
         omega = omega_orowan_sticking(alpha)
         correction = _geometric_correction(alpha)
         sign = 1.0 if zone > 0 else -1.0
         offset = (2 * kf_val / np.sqrt(3)) * (omega - sign * 0.5 * correction)
         return sigma_x - offset
+
+    def _orowan_sigma_y_mixed(self, sigma_x, alpha, kf_val, zone):
+        """``friction_model="mixed"`` variant of ``_orowan_sigma_y`` (see
+        module docstring): same Gl. (4.4/6) structure, but the sticking
+        inhomogeneity value omega_O(alpha,1) is linearly blended toward the
+        frictionless limit 1.0 using Bay & Wanheim's own smooth transition
+        variable Phi - which itself depends on sigma_y, the very quantity
+        being solved for, so this iterates to a fixed point. Phi only
+        depends on sigma_y through pn_coulomb, and omega_O varies weakly
+        with its argument (1.0 to ~0.785), so this converges in a handful
+        of iterations regardless of starting point."""
+        omega_sticking = omega_orowan_sticking(alpha)
+        correction = _geometric_correction(alpha)
+        sign = 1.0 if zone > 0 else -1.0
+
+        def sigma_y_for(omega):
+            offset = (2 * kf_val / np.sqrt(3)) * (omega - sign * 0.5 * correction)
+            return sigma_x - offset
+
+        sigma_y = sigma_y_for(omega_sticking)
+        for _ in range(10):
+            _, _, phi = self._mixed_friction_bw(sigma_y, alpha, kf_val, zone)
+            omega_eff = (1 - phi) * 1.0 + phi * omega_sticking
+            new_sigma_y = sigma_y_for(omega_eff)
+            if abs(new_sigma_y - sigma_y) < 1e-6 * max(abs(kf_val), 1.0):
+                sigma_y = new_sigma_y
+                break
+            sigma_y = new_sigma_y
+        return sigma_y
 
     def _orowan_margin(self, sigma_x, sigma_y_elastic, alpha, kf_val, zone):
         """sigma_y(elastic) minus Orowan's own predicted sigma_y at the same
@@ -279,11 +359,34 @@ class OrowanPassSection:
 
     # ---------------------------------------------------------- shared physics
 
+    def _mixed_friction_bw(self, sigma_y, alpha, kf_val, zone):
+        """Bay & Wanheim's mixed Coulomb/sticking friction law, identical in
+        form to ``_mixed_friction`` in layer_solver.py /
+        karman_mixed_friction_solver.py, with the sliding direction taken
+        from ``zone`` (entry material slower than the roll, exit faster)
+        rather than a velocity-difference sign, matching how the
+        sticking-only ``_friction`` already handles direction. Returns
+        (tau, pn, phi) - phi (the Coulomb-to-sticking transition weight,
+        0 at low pressure, 1 once sticking-limited) is reused by
+        ``_orowan_sigma_y_mixed`` to blend omega_O."""
+        s = self.solver
+        sign = 1.0 if zone > 0 else -1.0
+        pn_coulomb = -sigma_y / (1 + s.mu_r * np.tan(alpha) * sign)
+        pn_critical = s.mr * kf_val / (s.mu_r * np.sqrt(3))
+        phi = np.arctan((pn_coulomb - pn_critical) / (s.pressure_smoothness * pn_critical)) / np.pi + 0.5
+        tau = (s.mu_r * pn_coulomb * (1 - phi) + s.mr * kf_val / np.sqrt(3) * phi) * sign
+        pn = -sigma_y - tau * np.tan(alpha)
+        return tau, pn, phi
+
     def _friction(self, sigma_y, alpha, kf_val, zone):
-        """Sticking friction throughout: tau = +/- kf, sign set by zone
-        (matching entry material slower than the roll, exit faster) rather
-        than a velocity-difference sign (no smooth Coulomb/sticking
-        blending is needed for a sticking-only model)."""
+        """Dispatches between Orowan's own sticking friction (tau = +/- kf)
+        and the Bay & Wanheim mixed law, per ``friction_model`` (module
+        docstring). Direction (entry material slower than the roll, exit
+        faster) is set by ``zone`` in both cases rather than a
+        velocity-difference sign."""
+        if self.solver.friction_model == "mixed":
+            tau, pn, _ = self._mixed_friction_bw(sigma_y, alpha, kf_val, zone)
+            return tau, pn
         tau = kf_val * (1.0 if zone > 0 else -1.0)
         pn = -sigma_y - tau * np.tan(alpha)
         return tau, pn
@@ -292,9 +395,12 @@ class OrowanPassSection:
         """Elastic compression/recovery (Hooke's law), same construction as
         LayerRollingSolver's ns=1 pure-elastic branch: sigma_x stays fixed
         at its boundary-tension value while sigma_y/sigma_z build up under
-        the closing gap. No friction is applied here (sigma_x held
-        constant, not sticking): contact pressure is still ~0 through most
-        of the elastic zone, and friction cannot exceed what pressure can
+        the closing gap - unless ``friction_model="mixed"``, in which case
+        Bay & Wanheim friction (well-behaved as pressure -> 0) already
+        acts here too, same as LayerRollingSolver's own elastic zone. With
+        ``friction_model="sticking"`` (the default), no friction is applied
+        here at all: contact pressure is still ~0 through most of the
+        elastic zone, and friction cannot exceed what pressure can
         transmit regardless of the "sticking throughout" assumption for the
         plastic zone - applying full sticking (tau=kf) from x0, where
         pressure is genuinely zero, blows the stress up immediately
@@ -302,12 +408,24 @@ class OrowanPassSection:
         real contact pressure develops, i.e. once Orowan's own equations
         take over at yield."""
         s = self.solver
-        dhtot = s.dh_tot_dx(x, self.rw)
+        sigma_x, sigma_y, sigma_z, h, t = y
+        rw = self.rw
+        htot = s.h_tot(x, rw)
+        dhtot = s.dh_tot_dx(x, rw)
+
+        if s.friction_model == "mixed":
+            alpha = s.alpha_w(x, rw)
+            kf_val = self._kf_at(h)
+            tau, pn, _ = self._mixed_friction_bw(sigma_y, alpha, kf_val, zone)
+            d_sigma_x = -(sigma_x * dhtot + 2 * tau - 2 * pn * np.tan(alpha)) / htot
+        else:
+            d_sigma_x = 0.0
+
         d_eps_y = dhtot / self.h0
         em_star = s.em / (1 - s.nu_m ** 2)
-        d_sigma_y = em_star * d_eps_y
-        d_sigma_z = s.nu_m * d_sigma_y
-        return [0.0, d_sigma_y, d_sigma_z, dhtot, 0.0]
+        d_sigma_y = em_star * d_eps_y + s.nu_m / (1 - s.nu_m) * d_sigma_x
+        d_sigma_z = s.nu_m * (d_sigma_y + d_sigma_x)
+        return [d_sigma_x, d_sigma_y, d_sigma_z, dhtot, 0.0]
 
     def _plastic_rhs(self, x, y, zone):
         """Standard von-Kármán horizontal equilibrium (Gl. 4.4/1, the same
