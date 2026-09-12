@@ -2,7 +2,45 @@ import numpy as np
 import pytest
 from pyroll.core import Profile, PassSequence, RollPass, Roll, FlatGroove
 
-from pyroll.flat_rolling_slab_model.orowan_solver import OrowanSolver, omega_orowan_sticking
+from pyroll.flat_rolling_slab_model.orowan_solver import OrowanSolver, omega_orowan_sticking, omega_orowan_general
+
+
+def test_omega_orowan_general_reproduces_overhagens_abb_4_4_4():
+    """Overhagen's Abb. 4.4/4 plots omega_O(alpha, a_O) across the whole
+    a_O range at two angles (0 and 30 degrees), not just the two corner
+    values test_omega_orowan_matches_published_reference_values checks -
+    a stronger, whole-curve reproduction of the reconstructed Gl. (4.4/7)
+    with its corrected (alpha, not a_O) upper integration limit."""
+    for angle in (0.0, np.deg2rad(30)):
+        # a_O=0 (frictionless limit) is exactly 1 at any angle.
+        assert omega_orowan_general(angle, 0.0) == pytest.approx(1.0)
+        # a_O=1 (full sticking) must match the closed-form sticking
+        # function this solver actually uses, to machine precision - the
+        # general integral and the closed form are two independent
+        # derivations of the same a_O=1 slice.
+        assert omega_orowan_general(angle, 1.0) == pytest.approx(omega_orowan_sticking(angle), rel=1e-9)
+        # monotonically decreasing in a_O, matching the dissertation's own
+        # plotted curve shape (omega_O falls from 1 towards ~0.79-0.90 as
+        # friction ratio rises from 0 to 1).
+        values = [omega_orowan_general(angle, a) for a in (0.0, 0.25, 0.5, 0.75, 1.0)]
+        assert all(earlier > later for earlier, later in zip(values, values[1:]))
+
+    # at any fixed a_O, omega_O increases weakly with angle - the dissertation's
+    # own "depends only weakly on alpha" statement, checked here across the
+    # full a_O range rather than only at a_O=1 (already covered above).
+    for friction_ratio in (0.25, 0.5, 0.75, 1.0):
+        assert omega_orowan_general(np.deg2rad(30), friction_ratio) > omega_orowan_general(0.0, friction_ratio)
+
+    # alpha=0 has its own closed form (l'Hopital on cos(alpha*t) -> 1):
+    # omega_O(0, a_O) = 0.5*(sqrt(1-a_O^2) + arcsin(a_O)/a_O) - cross-check
+    # the alpha<1e-8 branch against a direct numeric integration at a tiny
+    # but nonzero angle, since that branch exists only to avoid a 0/0 in
+    # alpha/sin(alpha), not to change the underlying formula.
+    tiny_angle = 1e-6
+    for friction_ratio in (0.25, 0.5, 0.75, 1.0):
+        assert omega_orowan_general(0.0, friction_ratio) == pytest.approx(
+            omega_orowan_general(tiny_angle, friction_ratio), rel=1e-4,
+        )
 
 
 def test_omega_orowan_matches_published_reference_values():

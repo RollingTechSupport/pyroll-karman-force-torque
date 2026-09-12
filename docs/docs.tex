@@ -213,6 +213,20 @@
     \end{itemize}
     None of these affect $\omega_O$'s qualitative role or \autoref{eq:orowan-closure}'s overall structure; they are exactly the kind of detail worth re-checking against Orowan's 1943 paper directly if it becomes available.
 
+    The two closed-form checks above (\lstinline{tests/test_orowan_solve.py}) only confirm the corrected upper integration limit at the two corners of Overhagen's own Abb.~4.4/4 ($a_O \to 0$ and $a_O \to 1, \alpha \to 0$). A stronger check is to evaluate $\omega_O(\alpha, a_O)$ from \autoref{eq:omega-orowan} at the general $a_O \in [0,1]$ Overhagen's Gl.~4.4/7 is actually stated for - substituting $t = \theta/\alpha$ gives the equivalent, quadrature-friendly form
+    \begin{equation}
+        \omega_O(\alpha, a_O) = \frac{\alpha}{\sin\alpha} \int_0^1 \sqrt{1 - (a_O t)^2}\,\cos(\alpha t)\,\mathrm{d}t ,
+        \label{eq:omega-orowan-general}
+    \end{equation}
+    implemented as \lstinline{omega_orowan_general} in \lstinline{orowan_solver.py} purely for this validation - \lstinline{OrowanSolver} itself still only ever needs the $a_O=1$ slice via the mixed-friction blend described below. \autoref{eq:omega-orowan-general} reduces to \autoref{eq:omega-orowan}'s closed form at $a_O=1$ (checked to match \lstinline{omega_orowan_sticking} to machine precision) and to $\omega_O(0, a_O) = \frac12\!\left(\sqrt{1-a_O^2} + \arcsin(a_O)/a_O\right)$ at $\alpha=0$ by l'Hôpital's rule on $\cos(\alpha t) \to 1$ - both cross-checked in \lstinline{tests/test_orowan_solve.py}. \autoref{fig:omega-orowan-reproduction} reproduces Abb.~4.4/4 in full across the whole $a_O$ range at both angles it plots, rather than just its two derivable corners, and matches its shape and reported values closely: $\omega_O$ falls monotonically from $1$ at $a_O=0$ to about $0.785$-$0.79$ at $a_O=1$, with the $\alpha=\ang{30}$ curve consistently, but only slightly, above the $\alpha=\ang{0}$ one - exactly the "depends only weakly on $\alpha$" behavior Overhagen's own text states.
+
+    \begin{figure}
+        \centering
+        \includegraphics[width=0.6\linewidth]{img/omega-orowan-reproduction}
+        \caption{Reproduction of Overhagen's Abb.~4.4/4~\cite{Overhagen2018}: the inhomogeneity function $\omega_O(\alpha, a_O)$ from \autoref{eq:omega-orowan-general}, evaluated across the full friction-ratio range $a_O \in [0,1]$ at $\alpha=\ang{0}$ and $\alpha=\ang{30}$.}
+        \label{fig:omega-orowan-reproduction}
+    \end{figure}
+
     Generalizing \autoref{eq:orowan-closure} to mixed friction, rather than Orowan's own $a_O$-dependent sliding branch (his Gl.~4.4/5), keeps its structure unchanged and generalizes only $\omega_O$: the sticking value $\omega_O(\alpha)$ of \autoref{eq:omega-orowan} is linearly blended toward the frictionless limit $1$ using $\Phi$, the same smooth Coulomb-to-sticking transition variable \autoref{eq:mixed-friction} already computes for the friction law itself,
     \begin{equation}
         \omega_{O,\mathrm{eff}}(\alpha, \Phi) = (1-\Phi)\cdot 1 + \Phi\cdot\omega_O(\alpha)

@@ -72,6 +72,7 @@ relying on it beyond qualitative comparisons.
 import logging
 
 from scipy.special import jv
+from scipy.integrate import quad
 import numpy as np
 
 from pyroll.core import RollPass
@@ -101,6 +102,41 @@ def omega_orowan_sticking(angle: float) -> float:
     if angle < 1e-6:
         return np.pi / 4
     return np.pi * jv(1, angle) / (2 * np.sin(angle))
+
+
+def omega_orowan_general(angle: float, friction_ratio: float) -> float:
+    """Orowan's general inhomogeneity function omega_O(alpha, a_O) for
+    arbitrary friction ratio a_O in [0, 1] (Gl. 4.4/7 with the corrected
+    upper limit - see module docstring), not just the full-sticking
+    special case omega_orowan_sticking(alpha) = omega_orowan_general(alpha, 1)
+    this solver actually uses.
+
+    Not called by OrowanSolver itself - provided to independently validate
+    the reconstruction against Overhagen's own Abb. 4.4/4, which plots
+    omega_O against the *whole* a_O range at two angles, a stronger check
+    than the two isolated corner values (a_O -> 0 and a_O -> 1, alpha -> 0)
+    already covered by omega_orowan_sticking's docstring and tests/test_orowan_solve.py.
+
+    Derived by substituting t = theta/alpha into Gl. (4.4/7):
+
+        omega_O(alpha, a_O) = (alpha / sin(alpha))
+            * integral_0^1 sqrt(1 - (a_O*t)**2) * cos(alpha*t) dt
+
+    which reduces to omega_orowan_sticking's closed form at a_O=1 (matching
+    to machine precision - checked in tests/test_orowan_solve.py) and to
+    the closed form below at alpha=0 (l'Hopital / cos(alpha*t) -> 1):
+
+        omega_O(0, a_O) = 0.5 * (sqrt(1 - a_O**2) + arcsin(a_O) / a_O)
+    """
+    angle = abs(angle)
+    if angle < 1e-8:
+        if friction_ratio < 1e-12:
+            return 1.0
+        return 0.5 * (np.sqrt(max(1 - friction_ratio ** 2, 0.0)) + np.arcsin(friction_ratio) / friction_ratio)
+    integral, _ = quad(
+        lambda t: np.sqrt(max(1 - (friction_ratio * t) ** 2, 0.0)) * np.cos(angle * t), 0, 1,
+    )
+    return angle / np.sin(angle) * integral
 
 
 def _geometric_correction(angle: float) -> float:
