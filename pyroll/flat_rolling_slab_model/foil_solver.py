@@ -470,20 +470,83 @@ class FoilRollingSolver:
             return bracket[0]
         return brentq(residual, *bracket, xtol=1e-10)
 
+    def _anderson_candidate(self, history_shapes, history_residuals, shape, new_shape, relaxation_factor):
+        """Anderson(m) mixing (Walker & Ni, 2011, "Anderson Acceleration for
+        Fixed-Point Iterations", the Type-II/least-squares formulation) of the
+        outer loop's Picard update ``shape -> new_shape``, falling back to
+        plain relaxation when there isn't enough history yet or the
+        least-squares extrapolation misbehaves.
+
+        Plain (even adaptively-damped) relaxation blends only the *latest*
+        raw update against the current shape - it has no memory of how the
+        iteration got here. Once flattening is severe enough that this
+        Picard iteration's convergence is dominated by a single
+        near-degenerate direction (the elastic-flattening correction itself,
+        which is a small correction relative to the base rigid shape - see
+        the module docstring), plain relaxation of any fixed damping schedule
+        can crawl arbitrarily slowly along that direction without visibly
+        diverging (so adaptive damping alone never triggers a correction).
+        Anderson mixing instead extrapolates from the last few iterates'
+        *residuals* (``new_shape - shape``) via a small least-squares fit,
+        which is the standard fix for exactly this kind of stalling
+        secant-like iteration and needs no extra physics evaluations - only
+        linear algebra on the already-computed history.
+        """
+        residual = new_shape - shape
+        depth = len(history_residuals) - 1
+        if depth < 1:
+            return relaxation_factor * new_shape + (1 - relaxation_factor) * shape, False
+
+        delta_f = np.array([history_residuals[i + 1] - history_residuals[i] for i in range(depth)]).T
+        delta_x = np.array([history_shapes[i + 1] - history_shapes[i] for i in range(depth)]).T
+
+        try:
+            gamma, *_ = np.linalg.lstsq(delta_f, residual, rcond=None)
+        except np.linalg.LinAlgError:
+            return relaxation_factor * new_shape + (1 - relaxation_factor) * shape, False
+
+        x_bar = shape - delta_x @ gamma
+        f_bar = residual - delta_f @ gamma
+        candidate = x_bar + relaxation_factor * f_bar
+
+        if not np.all(np.isfinite(candidate)):
+            return relaxation_factor * new_shape + (1 - relaxation_factor) * shape, False
+
+        return candidate, True
+
+    def _evaluate_shape(self, shape):
+        """Run the entry/neutral-point/zone-chain physics for a given
+        roll-gap shape. Raises ``RuntimeError`` (from ``_find_entry_point``/
+        ``_find_neutral_point``/``_solve_zone_chain``) if the shape is
+        unphysical - e.g. an over-aggressive Anderson extrapolation (see
+        ``_anderson_candidate``) that wanders somewhere the entry or neutral
+        point can no longer be bracketed. Callers use this both to advance
+        the outer loop and, before committing to it, to *validate* a
+        candidate shape - an unvalidated Anderson step can otherwise crash
+        the whole solve outright rather than merely converging slowly.
+        """
+        height_of = CubicSpline(self.grid_positions, shape)
+        height_derivative_of = height_of.derivative()
+
+        entry_position = self._find_entry_point(height_of)
+        neutral_point_position = self._find_neutral_point(entry_position, height_of, height_derivative_of)
+        _, exit_position, segments = self._solve_zone_chain(
+            entry_position, neutral_point_position, height_of, height_derivative_of,
+        )
+        return entry_position, neutral_point_position, exit_position, segments
+
     def _solve_outer_loop(self):
         base_reference = self.base_shape.copy()
         shape = self.current_shape
+        relaxation_factor = self.relaxation_factor
+        anderson_depth = 5
+        history_shapes = []
+        history_residuals = []
+        previous_change = None
+
+        entry_position, neutral_point_position, exit_position, segments = self._evaluate_shape(shape)
 
         for iteration in range(self.max_outer_iterations):
-            height_of = CubicSpline(self.grid_positions, shape)
-            height_derivative_of = height_of.derivative()
-
-            entry_position = self._find_entry_point(height_of)
-            neutral_point_position = self._find_neutral_point(entry_position, height_of, height_derivative_of)
-            _, exit_position, segments = self._solve_zone_chain(
-                entry_position, neutral_point_position, height_of, height_derivative_of,
-            )
-
             all_positions = np.concatenate([segment[1] for segment in segments])
             all_pressures = np.concatenate([segment[2] for segment in segments])
             fill_value = all_pressures.min()
@@ -497,19 +560,65 @@ class FoilRollingSolver:
             new_shape = new_shape - offset
             base_reference = base_reference - offset
 
-            relaxed_shape = self.relaxation_factor * new_shape + (1 - self.relaxation_factor) * shape
-            change = np.max(np.abs(relaxed_shape - shape))
+            history_shapes.append(shape.copy())
+            history_residuals.append(new_shape - shape)
+            if len(history_shapes) > anderson_depth + 1:
+                history_shapes.pop(0)
+                history_residuals.pop(0)
 
-            shape = relaxed_shape
+            candidate_shape, used_anderson = self._anderson_candidate(
+                history_shapes, history_residuals, shape, new_shape, relaxation_factor,
+            )
+
+            # Adaptive damping safety net: accept the Anderson (or plain
+            # relaxed) candidate only if it both improves on the previous
+            # step's change AND is itself physically evaluable (guards
+            # against an over-aggressive Anderson extrapolation landing
+            # somewhere the entry/neutral-point search breaks down
+            # outright); otherwise fall back to plain relaxation with a
+            # halved factor, retried cheaply - the expensive physics above
+            # (for the *current* shape) is not re-solved, only the blend and
+            # its validation. Identical to the previous, non-adaptive
+            # behavior whenever the very first attempt already makes
+            # progress and evaluates cleanly (every case that already
+            # converged).
+            next_state = None
+            while True:
+                change = np.max(np.abs(candidate_shape - shape))
+                valid = previous_change is None or change < previous_change
+                if valid:
+                    try:
+                        next_state = self._evaluate_shape(candidate_shape)
+                    except RuntimeError:
+                        valid = False
+                if valid or relaxation_factor < 1e-4:
+                    break
+                relaxation_factor *= 0.5
+                candidate_shape = relaxation_factor * new_shape + (1 - relaxation_factor) * shape
+                used_anderson = False
+
+            if next_state is None:
+                # Even the smallest fallback step failed to evaluate - this is
+                # a genuine, unrecoverable failure (not merely slow
+                # convergence), so let the underlying RuntimeError propagate
+                # rather than silently continuing with a broken shape.
+                next_state = self._evaluate_shape(candidate_shape)
+
+            previous_change = change
+            shape = candidate_shape
+            entry_position, neutral_point_position, exit_position, segments = next_state
             self.entry_guess, self.neutral_guess = entry_position, neutral_point_position
 
             if change < self.tolerance:
-                log.debug(f"Foil rolling model converged after {iteration + 1} outer iterations.")
+                log.debug(
+                    f"Foil rolling model converged after {iteration + 1} outer iterations "
+                    f"(Anderson mixing: {used_anderson})."
+                )
                 break
         else:
             log.warning(
                 f"Foil rolling model did not converge within {self.max_outer_iterations} outer iterations "
-                f"(last change {change:.3e})."
+                f"(last change {change:.3e}, final relaxation_factor {relaxation_factor:.3e})."
             )
 
         self.current_shape = shape

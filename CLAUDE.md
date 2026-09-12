@@ -376,6 +376,42 @@ steel, ~24% lower. Any reimplementation should reproduce this direction
 (stiffer roll → less flattening → lower force for equal reduction) even
 if exact numbers differ with a different friction/tension/geometry setup.
 
+**Known limitation, worth knowing before re-attempting**: Abb. 9's own
+*literal* parameters (50% reduction, zero tension — a considerably more
+aggressive point than any convergent test case) do not converge with
+this solver, even after three separate, individually-validated fixes:
+`_gap_minimum` picking the roll-gap's true global minimum by height
+value rather than by first-derivative sign change (a shallow local kink
+from an incipient sticking sub-zone otherwise fools it); adaptive
+relaxation (halving the damping factor whenever a step fails to shrink
+the iterate-to-iterate change, breaking limit cycles a fixed factor
+cannot); and Anderson(m) mixing (Walker & Ni, 2011) replacing the plain
+relaxed blend, extrapolating from several past iterates' residuals via a
+small least-squares fit — the standard fix once a Picard iteration's
+convergence is dominated by a single near-degenerate direction, which is
+exactly what the small-but-load-bearing elastic-flattening correction
+against a much larger rigid baseline produces here. Every Anderson step
+is re-validated by actually re-running the entry/neutral-point/zone-chain
+physics before being accepted (falling back to a shrunk plain-relaxed
+step, and ultimately raising rather than silently continuing, if even
+that fails) — an unguarded/unvalidated Anderson step was tried first and
+it crashed outright (an extrapolated shape landing somewhere the
+neutral-point search couldn't bracket at all), which is why validation
+before acceptance matters here, not just afterward. Even with all three
+fixes, Abb. 9's exact case still fails: even an infinitesimal step off an
+already-accepted shape breaks neutral-point bracketing there, indicating
+a genuine structural fragility of the zone-chain search at this specific
+extreme parameter combination, not merely slow convergence — treated as
+a documented limitation rather than pursued further. The per-step
+physics re-validation this required is not free: it roughly tripled
+`tests/test_foil_solve.py`'s slow-suite wall-clock time (~50 min → ~2h13m),
+an accepted cost for a solver that no longer stalls or crashes on harder
+(but still convergent) passes. The qualitative direction above remains
+validated on a less extreme, convergent pass
+(`test_foil_solver_converges_and_reduces_force_with_stiffer_roll`) — that
+is what this plugin is actually validated against, not Abb. 9's exact
+force values.
+
 ## 7. Speed/inertia effects (Troost's plastokinetic extension)
 
 Everything above is *plastostatic* (German: Plastostatik) — it neglects
