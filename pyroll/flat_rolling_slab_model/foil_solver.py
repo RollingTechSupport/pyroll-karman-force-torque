@@ -356,30 +356,47 @@ class FoilRollingSolver:
                 return candidates[i], candidates[i + 1]
         return None
 
-    def _gap_minimum(self, entry_position, height_derivative_of):
-        """Upper bound for the neutral point: the (first, moving rightward from
-        the entry point) point where the *current* roll-gap shape has a
-        horizontal tangent. The neutral point must lie strictly before this -
-        it is not, in general, at X=0, which is merely where the undeformed
-        reference parabola happens to be centered and drifts arbitrarily as
-        the elastic correction is applied, so it must never be used as a
-        search bound."""
+    def _gap_minimum(self, entry_position, height_derivative_of, height_of):
+        """Upper bound for the neutral point: the point (moving rightward
+        from the entry point) where the *current* roll-gap shape's height
+        is actually smallest. The neutral point must lie strictly before
+        this - it is not, in general, at X=0, which is merely where the
+        undeformed reference parabola happens to be centered and drifts
+        arbitrarily as the elastic correction is applied, so it must never
+        be used as a search bound.
+
+        Found by locating the global minimum of height_of by *value* over
+        the candidate grid, then bracketing height_derivative_of's zero
+        crossing around it (expanding the bracket if the immediate
+        neighbors don't already have opposite signs). Looking for the
+        derivative's first sign change instead (an earlier version of this
+        function did that) is not robust once flattening is significant:
+        the elastically-corrected shape can develop a shallow local kink
+        well before the true minimum - a small negative-to-positive-to-
+        negative wiggle (physically, a sticking zone just starting to form)
+        - that a naive first-crossing search latches onto, collapsing the
+        neutral-point search domain onto a spurious, much-too-early bound.
+        Picking the minimum by value is immune to this, since the shallow
+        kink's height is not actually the smallest value on the grid.
+        """
         candidates = np.linspace(
-            entry_position + 1e-6 * abs(entry_position), self.grid_positions[-1] * 0.999, 60,
+            entry_position + 1e-6 * abs(entry_position), self.grid_positions[-1] * 0.999, 200,
         )
-        values = height_derivative_of(candidates)
-        for i in range(len(candidates) - 1):
-            if values[i] == 0:
-                return candidates[i]
-            if values[i] * values[i + 1] < 0:
-                return brentq(lambda x: float(height_derivative_of(x)), candidates[i], candidates[i + 1], xtol=1e-10)
+        heights = height_of(candidates)
+        derivatives = height_derivative_of(candidates)
+        min_index = int(np.argmin(heights))
+        for margin in (1, 2, 4, 8, 16):
+            lo = max(0, min_index - margin)
+            hi = min(len(candidates) - 1, min_index + margin)
+            if derivatives[lo] < 0 < derivatives[hi]:
+                return brentq(lambda x: float(height_derivative_of(x)), candidates[lo], candidates[hi], xtol=1e-10)
         return self.grid_positions[-1] * 0.999
 
     def _find_neutral_point(self, entry_position, height_of, height_derivative_of):
         def residual(neutral_point_position):
             return self._solve_zone_chain(entry_position, neutral_point_position, height_of, height_derivative_of)[0]
 
-        upper_bound = self._gap_minimum(entry_position, height_derivative_of)
+        upper_bound = self._gap_minimum(entry_position, height_derivative_of, height_of)
 
         # Warm-start: the neutral point moves only slightly between successive
         # outer (elastic-flattening) iterations, and the roll-gap height can
