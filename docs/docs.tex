@@ -108,6 +108,15 @@
 
     Once elastic roll flattening becomes severe enough, even a scalar (Hitchcock) roll-flattening correction to \lstinline{Roll.working_radius} is no longer accurate, because the flattened roll-gap shape stops being well approximated by a single effective radius. \lstinline{foil_solver.py} implements \lstinline{FoilRollingSolver}, following Mauk and Overhagen~\cite{MaukOverhagen2013}, which instead computes the true, generally non-circular, deformed roll-gap shape directly: the normal-pressure distribution along the contact is superposed with elastic half-space (Boussinesq/Johnson~\cite{Johnson1985}) influence coefficients to obtain the roll surface's own elastic deflection, iterated to convergence with the strip's own elastic-plastic stress solution (elastic entry, plastic slip, an optional sticking zone, plastic slip, elastic exit).
 
+    This converged shape - against the rigid, circular baseline it started from - is exposed as \lstinline{roll_contour}, a dataframe indexed by roll-gap position $x$ with columns \lstinline{gap_height} (the flattened shape) and \lstinline{rigid_gap_height} (the undeformed circular arc it is compared against); \lstinline{report.py}'s \lstinline{foil_rolling_contour_plot} renders it automatically whenever \lstinline{FoilRollingSolver} is the dispatched solver. \autoref{fig:foil-roll-contour} shows it for the 0.1\,mm-to-0.077\,mm steel-foil pass of \autoref{tab:model-overview} (Table 5 of the report): the two curves are visually close - a reminder that the flattening is a small correction to an already-small gap, not a gross reshaping - but the deviation panel below makes the effect visible on its own scale: a few micrometres, asymmetric about the roll-gap centre (the entry side flattens more than the exit side here), and consistently load-bearing rather than numerical noise, since it is exactly this deviation that the influence-coefficient/pressure iteration was solving for to begin with.
+
+    \begin{figure}
+        \centering
+        \includegraphics[width=0.8\linewidth]{img/foil-roll-contour}
+        \caption{Flattened vs.\ rigid (circular) roll-gap contour for a representative foil pass, with the deviation between them shown on its own scale below.}
+        \label{fig:foil-roll-contour}
+    \end{figure}
+
 
     \section{Selecting between the three models}\label{sec:dispatch}
 
@@ -148,7 +157,7 @@
             \texttt{Foil\-Rolling\-Solver} &
             elastic-plastic, homogeneous cross-section, elastic (non-circular) roll-gap contour &
             Coulomb with optional sticking zone &
-            foil rolling: $L_d/H_m > 10$ (default), i.e.\ contact length large relative to mean thickness - our own 0.5\,mm-to-0.2\,mm steel-foil case reaches $L_d/H_m$ in the tens; industrial foils are typically well under 0.1\,mm and correspondingly further into this regime \\
+            foil rolling: $L_d/H_m > 10$ (default), i.e.\ contact length large relative to mean thickness - our own 0.1\,mm-to-0.077\,mm steel-foil case (\autoref{fig:foil-roll-contour}) reaches $L_d/H_m \approx 6$, and thinner/higher-friction variants comfortably exceed 10; industrial foils are typically well under 0.1\,mm and correspondingly further into this regime \\
             \addlinespace
             \texttt{Orowan\-Solver} &
             elastic-plastic, single homogeneous cross-section, circular-arc inhomogeneity correction &
@@ -248,6 +257,8 @@
     The hooks \lstinline{back_tension}, \lstinline{front_tension} and \lstinline{coulomb_friction_coefficient} have to be set and adjusted individually; since all three dispatched models are elastic-plastic, \lstinline{elastic_modulus} and \lstinline{poissons_ratio} must also be set on both \lstinline{RollPass.Roll} and \lstinline{RollPass.InProfile} for every pass (see \autoref{sec:dispatch}) - there is no fallback for passes that omit them - and the layer model's thermal coupling additionally needs \lstinline{specific_heat_capacity}, \lstinline{thermal_conductivity} and \lstinline{density} set on both.
 
     \lstinline{OrowanSolver} (\autoref{sec:orowan-model}) is not reachable through \lstinline{karman_solution}, since it is not part of the automatic dispatch of \autoref{sec:dispatch}; call it directly once the pass has been solved, e.g.\ \lstinline{OrowanSolver(roll_pass=roll_pass)} after \lstinline{PassSequence([roll_pass]).solve(in_profile)}, then read \lstinline{roll_force_per_unit_width}, \lstinline{roll_torque_per_unit_width}, \lstinline{neutral_plane_position} and \lstinline{solution} off the returned instance directly, the same attributes the other three solvers expose.
+
+    \lstinline{FoilRollingSolver} additionally exposes \lstinline{roll_contour} (\autoref{sec:foil-model}, \autoref{fig:foil-roll-contour}), the converged flattened roll-gap shape against its rigid circular baseline - not provided by the other three solvers, since they do not compute a roll-gap shape beyond the single working radius they read from \lstinline{Roll.working_radius}.
 
     \begin{table}
         \centering
