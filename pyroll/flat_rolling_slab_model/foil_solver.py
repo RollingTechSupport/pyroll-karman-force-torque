@@ -36,6 +36,8 @@ from scipy.optimize import brentq
 
 from pyroll.core import RollPass
 
+from pyroll.flat_rolling_slab_model.dynamic_flow_stress import troost_dynamic_flow_stress_correction
+
 log = logging.getLogger(__name__)
 
 
@@ -118,6 +120,11 @@ class FoilRollingSolver:
             strain_rate=roll_pass.strain_rate,
             temperature=profile.temperature,
         )
+        if roll_pass.dynamic_flow_stress_correction_enabled:
+            reference_velocity = 2 * np.pi * roll.rotational_frequency * self.radius
+            self.flow_stress += troost_dynamic_flow_stress_correction(
+                total_strain / 2, profile.density, reference_velocity,
+            )
 
         back_tension = roll_pass.back_tension
         front_tension = roll_pass.front_tension

@@ -1,13 +1,13 @@
 [project]
-name = "pyroll-karman-force-torque"
-description = "Plugin for PyRoll providing the power and labour model solving the von-Karman equation."
+name = "pyroll-flat-rolling-slab-model"
+description = "Plugin for PyRoll providing flat-rolling slab-theory models (von-Karman/Orowan/layer/foil) for roll force, torque and neutral point."
 authors = [
     { name = "Christoph Renzing", email = "christoph.renzing@imf.tu-freiberg.de" }
 ]
 license = "BSD-3-Clause"
 homepage = "https://pyroll-project.github.io/"
-repository = "https://github.com/pyroll-project/pyroll-karman-force-torque"
-documentation = "https://github.com/pyroll-project/pyroll-karman-force-torque/blob/main/docs/docs.pdf"
+repository = "https://github.com/pyroll-project/pyroll-flat-rolling-slab-model"
+documentation = "https://github.com/pyroll-project/pyroll-flat-rolling-slab-model/blob/main/docs/docs.pdf"
 
 readme = "README.md"
 classifiers = [

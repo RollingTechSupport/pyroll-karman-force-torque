@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 from pyroll.core import Profile, PassSequence, RollPass, Roll, FlatGroove
 
-from pyroll.karman_force_torque.orowan_solver import OrowanSolver, omega_orowan_sticking
+from pyroll.flat_rolling_slab_model.orowan_solver import OrowanSolver, omega_orowan_sticking
 
 
 def test_omega_orowan_matches_published_reference_values():

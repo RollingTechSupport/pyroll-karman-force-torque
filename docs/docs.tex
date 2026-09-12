@@ -11,13 +11,13 @@
 % Document
 \begin{document}
 
-    \title{Karman Power and Labour PyRolL Plugin}
+    \title{Flat Rolling Slab Model PyRolL Plugin}
     \author{Christoph Renzing}
     \date{\today}
 
     \maketitle
 
-    The PyRolL plugin pyroll-karman-power-and-labour calculates the roll-force and roll-torque as well as the mean neutral plane location for a roll-pass.
+    The PyRolL plugin pyroll-flat-rolling-slab-model calculates the roll-force and roll-torque as well as the mean neutral plane location for a roll-pass.
     Since von-Karman originally developed the strip or slap theory for flat rolling, the grooved pass is not considered directly.
     The solution is therefore derived for an equivalent flat pass, which makes the plugin's accuracy heavily depended on the equivalent flat pass plugins.
 
@@ -70,7 +70,9 @@
 
     Every model in this plugin bounds the plastic zone integrating \autoref{eq:karman-elem} with Hooke's-law elastic entry and exit zones (rather than assuming the whole contact is plastic from the first point of contact), and closes the friction shear stress $\tau_R$ with Bay and Wanheim's mixed Coulomb/sticking law (\autoref{eq:mixed-friction}) rather than plain Coulomb friction - \autoref{sec:mixed-friction-model} and \autoref{sec:orowan-model} share this construction in \lstinline{_elastic_plastic_common.py}, differing only in the closure relating $\sigma_x$ and $\sigma_y$.
 
-    \autoref{eq:karman-elem} is itself only the \emph{static} force balance (Plastostatik) at the strip element - it neglects the inertia of the material accelerating through the roll gap and any direct dependence of flow stress on strain rate beyond what is passed into \lstinline{flow_stress_function}. Troost~\cite{Troost1967} extends the same elementary strip-element theory (citing von Kármán, Siebel and Orowan as its origin) to a "plastokinetic" one: adding the volume element's inertial force (via d'Alembert's principle) and the strain-rate/temperature dependence of flow stress lets Gl.~(5)-(11) of that paper be recast as a \emph{dynamic} flow stress $k_f^*$ that folds both effects into an otherwise unchanged static solution - existing solutions of \autoref{eq:karman-elem} (and its approximations) carry over unmodified once $k_f$ is replaced by $k_f^*$. Troost's own worked example found the resulting correction small in practice ($k_f^*-k_f$ well under $\SI{3}{MPa}$, and roll force varying by only about $\pm10\%$ across a \SI{1}{m/s}-to-\SI{50}{m/s} exit-velocity range for a first, unworked pass) and dominated in his results by the velocity-dependence of the friction coefficient rather than by inertia itself. None of the models in this plugin implement this kinetic extension - like Ekelund's redundant-shear correction (\autoref{sec:layer-model}), it is noted here as a documented, deliberately out-of-scope refinement to the same underlying slab theory, relevant chiefly at rolling speeds well beyond this plugin's validated range.
+    \autoref{eq:karman-elem} is itself only the \emph{static} force balance (Plastostatik) at the strip element - it neglects the inertia of the material accelerating through the roll gap and any direct dependence of flow stress on strain rate beyond what is passed into \lstinline{flow_stress_function}. Troost~\cite{Troost1967} extends the same elementary strip-element theory (citing von Kármán, Siebel and Orowan as its origin) to a "plastokinetic" one: adding the volume element's inertial force (via d'Alembert's principle) and the strain-rate/temperature dependence of flow stress lets Gl.~(5)-(11) of that paper be recast as a \emph{dynamic} flow stress $k_f^*$ that folds both effects into an otherwise unchanged static solution - existing solutions of \autoref{eq:karman-elem} (and its approximations) carry over unmodified once $k_f$ is replaced by $k_f^*$. Troost's own worked example found the resulting correction small in practice ($k_f^*-k_f$ on the order of a few MPa, and roll force varying by only about $\pm10\%$ across a \SI{1}{m/s}-to-\SI{50}{m/s} exit-velocity range for a first, unworked pass) and dominated in his results by the velocity-dependence of the friction coefficient rather than by inertia itself.
+
+    The inertial half of Troost's correction (\lstinline{dynamic_flow_stress.py}) is implemented as an optional add-on, gated by the \lstinline{dynamic_flow_stress_correction_enabled} hook (default \lstinline{False}) and applied identically at every flow-stress evaluation in all four solvers - the height ratio $h_0/h(x)$ his eq.~(12) needs is recovered from the equivalent strain already computed at each call site ($\varphi_v = 2/\sqrt3\cdot\ln(h_0/h(x))$), so no extra geometry plumbing is required. The reference velocity feeding the "Staudruck" $q_{st,0}=\frac12\rho U_0^2$ is the roll's own peripheral speed $2\pi n R$, rather than a self-consistently slip-derived strip velocity - Troost's own worked example likewise treats speed as an independent input rather than solving for it jointly with the pressure distribution, and the correction's magnitude does not warrant that added rigor. Left off by default because, as the numbers above show, it stays under 1\% of a typical cold-rolling flow stress below about \SI{10}{m/s} and only reaches a low single-digit percentage at speeds above roughly \SI{75}{m/s}, well beyond this plugin's validated range; it does not implement the strain-rate/temperature half of Troost's $k_f^*$ (already covered by whatever dependence \lstinline{flow_stress_function} itself has on \lstinline{strain_rate}) or his refined friction-velocity dependence. Like Ekelund's redundant-shear correction (\autoref{sec:layer-model}), the rest of Troost's plastokinetic theory beyond this inertial term is noted here as a documented, deliberately out-of-scope refinement to the same underlying slab theory.
 
 
     \section{Mixed-friction model for medium passes}\label{sec:mixed-friction-model}
@@ -268,7 +270,7 @@
 
 
     \section{Usage instructions}\label{sec:usage-instructions}
-    The plugin can be loaded under the name \texttt{pyroll\_karman\_power\_and\_labour}.
+    The plugin can be loaded under the name \texttt{pyroll\_flat\_rolling\_slab\_model}.
 
     An implementation of the \lstinline{roll_force} hook on \lstinline{RollPass} is provided.
     Furthermore, an implementation of the \lstinline{roll_torque} and \lstinline{neutral_point} hooks on \lstinline{RollPass.Roll} is provided.
@@ -298,7 +300,8 @@
             \texttt{layer\_model\_ld\_hm\_limit} & $L_d/H_m$ ratio below which the multi-layer configuration is used (default 1.0) \\
             \texttt{layer\_model\_layer\_count} & Number of through-thickness layers on the thick-slab path (default 5) \\
             \texttt{friction\_stiction\_coefficient} & Sticking friction coefficient $m$ feeding the mixed friction law (\autoref{eq:mixed-friction}) of \texttt{KarmanMixedFrictionSolver} and \texttt{LayerRollingSolver} (default 0.8) \\
-            \texttt{roll\_heat\_transfer\_coefficient} & Heat transfer coefficient at the roll/material interface (default \SI{6000}{W/(m^2 K)}) \\
+            \texttt{roll\_\allowbreak heat\_\allowbreak transfer\_\allowbreak coefficient} & Heat transfer coefficient at the roll/material interface (default \SI{6000}{W/(m^2 K)}) \\
+            \texttt{dynamic\_\allowbreak flow\_\allowbreak stress\_\allowbreak correction\_\allowbreak enabled} & Whether Troost's inertial flow-stress correction (\autoref{sec:model-approach}) is applied (default \texttt{False}) \\
             \bottomrule
         \end{tabular}
     \end{table}

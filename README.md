@@ -1,4 +1,4 @@
-# PyRolL Karman power and labour
+# PyRolL Flat Rolling Slab Model
 
 PyRolL Plugin for calculation of power and labour solving von-Karman ODE for a equivalent flat pass.
 
@@ -57,6 +57,6 @@ For the docs, see [here](docs/docs.pdf) (source in [`docs/docs.tex`](docs/docs.t
 
 This project is licensed under the [BSD-3-Clause license](LICENSE).
 
-The package is available via [PyPi](https://pypi.org/project/pyroll-karman-power-and-labour/) and can be installed with
+The package is available via [PyPi](https://pypi.org/project/pyroll-flat-rolling-slab-model/) and can be installed with
 
-    pip install pyroll-karman-power-and-labour
+    pip install pyroll-flat-rolling-slab-model

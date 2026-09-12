@@ -1,8 +1,8 @@
 from pyroll.core import RollPass, Hook
-from pyroll.karman_force_torque.condition import contact_length_over_mean_thickness
-from pyroll.karman_force_torque.foil_solver import FoilRollingSolver
-from pyroll.karman_force_torque.layer_solver import LayerRollingSolver
-from pyroll.karman_force_torque.karman_mixed_friction_solver import KarmanMixedFrictionSolver
+from pyroll.flat_rolling_slab_model.condition import contact_length_over_mean_thickness
+from pyroll.flat_rolling_slab_model.foil_solver import FoilRollingSolver
+from pyroll.flat_rolling_slab_model.layer_solver import LayerRollingSolver
+from pyroll.flat_rolling_slab_model.karman_mixed_friction_solver import KarmanMixedFrictionSolver
 
 RollPass.karman_solution = Hook[object]()
 """Solution values of the pass (one of KarmanMixedFrictionSolver,
@@ -47,6 +47,14 @@ RollPass.roll_heat_transfer_coefficient = Hook[float]()
 """Heat transfer coefficient at the roll/material interface, used by
 LayerRollingSolver's thermal coupling. Default 6000 W/(m^2 K)."""
 
+RollPass.dynamic_flow_stress_correction_enabled = Hook[bool]()
+"""Whether to add Troost's (1967) plastokinetic correction to flow stress
+(see dynamic_flow_stress.py), accounting for the strip's inertia at high
+rolling speeds. Off by default: the correction is well under 1% of flow
+stress for typical cold-rolling speeds and only reaches a low single-digit
+percentage at speeds far beyond what this plugin is validated for (see
+docs.tex). Requires Profile.density when enabled."""
+
 
 @RollPass.foil_rolling_ld_hm_limit
 def foil_rolling_ld_hm_limit(self: RollPass):
@@ -71,6 +79,11 @@ def friction_stiction_coefficient(self: RollPass):
 @RollPass.roll_heat_transfer_coefficient
 def roll_heat_transfer_coefficient(self: RollPass):
     return 6000.0
+
+
+@RollPass.dynamic_flow_stress_correction_enabled
+def dynamic_flow_stress_correction_enabled(self: RollPass):
+    return False
 
 
 @RollPass.foil_rolling_condition

@@ -33,7 +33,7 @@ import numpy as np
 
 from pyroll.core import RollPass
 
-from pyroll.karman_force_torque._elastic_plastic_common import (
+from pyroll.flat_rolling_slab_model._elastic_plastic_common import (
     bay_wanheim_coulomb_from_stiction,
     ElasticPlasticSolverBase,
     ElasticPlasticSection,

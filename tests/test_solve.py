@@ -15,7 +15,7 @@ def test_solve_oval(tmp_path: Path, caplog):
     caplog.set_level(logging.INFO, logger="pyroll")
 
     import pyroll.freiberg_flow_stress
-    import pyroll.karman_force_torque
+    import pyroll.flat_rolling_slab_model
 
     in_profile = Profile.round(
         diameter=30e-3,
@@ -73,7 +73,7 @@ def test_solve_flat_flat(tmp_path: Path, caplog):
     caplog.set_level(logging.INFO, logger="pyroll")
 
     import pyroll.freiberg_flow_stress
-    import pyroll.karman_force_torque
+    import pyroll.flat_rolling_slab_model
 
     in_profile = Profile.box(
         height=15e-3,

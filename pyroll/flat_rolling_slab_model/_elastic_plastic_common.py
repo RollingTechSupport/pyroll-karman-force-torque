@@ -13,6 +13,8 @@ from scipy.optimize import brentq
 
 from pyroll.core import RollPass
 
+from pyroll.flat_rolling_slab_model.dynamic_flow_stress import troost_dynamic_flow_stress_correction
+
 
 def bay_wanheim_coulomb_from_stiction(stiction_coefficient: float) -> float:
     """Equivalent Coulomb friction coefficient for a given stiction
@@ -68,6 +70,11 @@ class ElasticPlasticSolverBase:
         self.back_tension = roll_pass.back_tension
         self.front_tension = roll_pass.front_tension
 
+        self.dynamic_flow_stress_correction_enabled = roll_pass.dynamic_flow_stress_correction_enabled
+        if self.dynamic_flow_stress_correction_enabled:
+            self.density = profile.density
+            self.reference_velocity = 2 * np.pi * self.rotational_frequency * self.roll_radius
+
     def height(self, position, roll_radius):
         return self.gap + 2 * (roll_radius - np.sqrt(roll_radius ** 2 - position ** 2))
 
@@ -91,7 +98,10 @@ class ElasticPlasticSolverBase:
         return abs(2 * np.pi * self.rotational_frequency * roll_radius / contact_length * draft_strain)
 
     def flow_stress(self, strain, strain_rate):
-        return self.flow_stress_function(strain=strain, strain_rate=strain_rate, temperature=self.temperature)
+        flow_stress = self.flow_stress_function(strain=strain, strain_rate=strain_rate, temperature=self.temperature)
+        if self.dynamic_flow_stress_correction_enabled:
+            flow_stress += troost_dynamic_flow_stress_correction(strain, self.density, self.reference_velocity)
+        return flow_stress
 
     def _solve(self):
         self.section = self.section_cls(self, self.roll_radius)

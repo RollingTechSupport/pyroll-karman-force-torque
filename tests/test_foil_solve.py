@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 from pyroll.core import Profile, PassSequence, RollPass, Roll, FlatGroove
 
-import pyroll.karman_force_torque  # noqa: F401  (registers the foil_rolling_* hooks)
+import pyroll.flat_rolling_slab_model  # noqa: F401  (registers the foil_rolling_* hooks)
 
 
 def _flow_stress(kf):
@@ -68,7 +68,7 @@ def test_missing_elastic_properties_raises(caplog):
     caplog.set_level(logging.INFO, logger="pyroll")
 
     import pyroll.freiberg_flow_stress
-    import pyroll.karman_force_torque
+    import pyroll.flat_rolling_slab_model
 
     in_profile = Profile.box(
         height=15e-3,
@@ -110,8 +110,8 @@ def test_ld_hm_ratio_exceeds_default_limit_for_thin_foil():
     convergence check on a more moderate (but still foil-rolling-regime)
     pass.
     """
-    import pyroll.karman_force_torque
-    from pyroll.karman_force_torque.condition import contact_length_over_mean_thickness
+    import pyroll.flat_rolling_slab_model
+    from pyroll.flat_rolling_slab_model.condition import contact_length_over_mean_thickness
 
     kf = 1000e6
     in_profile = Profile.box(

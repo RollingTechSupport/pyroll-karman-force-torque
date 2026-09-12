@@ -4,8 +4,8 @@ from pyroll.core import Unit, PassSequence, Transport, CoolingPipe, RollPass
 
 import matplotlib.pyplot as plt
 
-from pyroll.karman_force_torque.foil_solver import FoilRollingSolver
-from pyroll.karman_force_torque.layer_solver import LayerRollingSolver
+from pyroll.flat_rolling_slab_model.foil_solver import FoilRollingSolver
+from pyroll.flat_rolling_slab_model.layer_solver import LayerRollingSolver
 
 
 @hookimpl(specname="unit_plot")

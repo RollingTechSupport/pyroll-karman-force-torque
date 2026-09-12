@@ -4,7 +4,7 @@ packages = [
 ]
 
 [version]
-path = "pyroll/karman_force_torque/__init__.py"
+path = "pyroll/flat_rolling_slab_model/__init__.py"
 
 [envs.default]
 path = ".venv"

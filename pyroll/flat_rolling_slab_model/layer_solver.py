@@ -68,6 +68,8 @@ from scipy.optimize import brentq, root
 
 from pyroll.core import RollPass
 
+from pyroll.flat_rolling_slab_model.dynamic_flow_stress import troost_dynamic_flow_stress_correction
+
 log = logging.getLogger(__name__)
 
 MU_R_INNER = 0.388985
@@ -158,6 +160,10 @@ class LayerRollingSolver:
 
         self.br_roll = np.sqrt(self.roll_thermal_conductivity * self.roll_heat_capacity * self.roll_density)
 
+        self.dynamic_flow_stress_correction_enabled = rp.dynamic_flow_stress_correction_enabled
+        if self.dynamic_flow_stress_correction_enabled:
+            self.reference_velocity = 2 * np.pi * self.rotational_frequency * self.nominal_radius
+
     def br(self, t):
         return np.sqrt(self.thermal_conductivity * self.heat_capacity * self.density)
 
@@ -183,7 +189,10 @@ class LayerRollingSolver:
         return abs(2 * np.pi * self.rotational_frequency * roll_radius / contact_length * np.log(self.total_entry_height / self.gap))
 
     def flow_stress(self, t, equivalent_strain, phi_v_dot):
-        return self.flow_stress_function(strain=equivalent_strain, strain_rate=phi_v_dot, temperature=t)
+        flow_stress = self.flow_stress_function(strain=equivalent_strain, strain_rate=phi_v_dot, temperature=t)
+        if self.dynamic_flow_stress_correction_enabled:
+            flow_stress += troost_dynamic_flow_stress_correction(equivalent_strain, self.density, self.reference_velocity)
+        return flow_stress
 
     def flow_stress_temperature_derivative(self, t, equivalent_strain, phi_v_dot, eps=1e-2):
         return (self.flow_stress(t + eps, equivalent_strain, phi_v_dot) - self.flow_stress(t - eps, equivalent_strain, phi_v_dot)) / (2 * eps)

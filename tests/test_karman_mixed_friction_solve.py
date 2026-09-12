@@ -1,7 +1,7 @@
 import pytest
 from pyroll.core import Profile, PassSequence, RollPass, Roll, FlatGroove
 
-from pyroll.karman_force_torque.karman_mixed_friction_solver import KarmanMixedFrictionSolver
+from pyroll.flat_rolling_slab_model.karman_mixed_friction_solver import KarmanMixedFrictionSolver
 
 
 def _flow_stress(kf):
