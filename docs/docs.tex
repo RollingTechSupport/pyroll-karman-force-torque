@@ -126,6 +126,15 @@
         \label{fig:foil-roll-contour-stiffness}
     \end{figure}
 
+    Gauge itself also matters, independent of roll stiffness: \autoref{fig:foil-roll-contour-gauge} holds the roll and the relative schedule fixed (23\% reduction, $\mu=0.1$, the same tension-to-flow-stress ratios) and only varies the incoming thickness, plotting the deviation \emph{relative to the local rigid gap height} (since the absolute gap, and hence the absolute deviation, shrinks with gauge too) - a thinner incoming gauge (\SI{0.05}{mm} vs.\ \SI{0.10}{mm}) shows a substantially larger relative deviation (up to about $11\%$ vs.\ $5\%$ here), confirming \lstinline{test_thinner_foil_flattens_more_than_thicker_foil}'s finding: the same absolute roll stiffness and force make up a bigger fraction of an already-smaller gap as the foil gets thinner.
+
+    \begin{figure}
+        \centering
+        \includegraphics[width=0.8\linewidth]{img/foil-roll-contour-gauge}
+        \caption{Relative roll-gap deviation ((flattened $-$ rigid)/rigid) for two incoming gauges at the same relative reduction, friction and tension ratios - the thinner foil flattens proportionally more.}
+        \label{fig:foil-roll-contour-gauge}
+    \end{figure}
+
 
     \section{Selecting between the three models}\label{sec:dispatch}
 
