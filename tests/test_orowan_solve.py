@@ -33,14 +33,9 @@ def _flow_stress(kf):
 @pytest.mark.slow
 def test_orowan_solver_converges_with_sane_outputs():
     """A representative hot-rolling pass: converges, gives a positive force
-    and torque comparable in order of magnitude to the mixed-friction
-    model's estimate for the same geometry and a similarly high friction
-    coefficient (both should be dominated by sticking for this geometry),
-    and a normal-pressure profile that forms the expected friction hill
-    (positive throughout, single interior peak) rather than dipping
-    negative (the bug this test would have caught: an earlier version of
-    the sigma_x/sigma_y sign mapping made pressure decrease monotonically
-    from the entry edge instead)."""
+    and torque, and a normal-pressure profile that forms the expected
+    friction hill (positive throughout, single interior peak) rather than
+    dipping negative."""
     in_profile = Profile.box(
         height=15e-3, width=200e-3, temperature=1200 + 273.15, strain=0,
         material=["dummy"], elastic_modulus=210e9, poissons_ratio=0.3,

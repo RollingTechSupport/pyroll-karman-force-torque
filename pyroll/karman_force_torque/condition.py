@@ -28,9 +28,9 @@ def contact_length_over_mean_thickness(roll_pass: RollPass, working_radius: floa
     roll-gap-contour model) - see ``roll_pass.py``'s ``thick_slab_condition``
     and ``foil_rolling_condition``.
     """
-    h0 = roll_pass.in_profile.equivalent_height
-    h1 = roll_pass.out_profile.equivalent_height
-    draft = h0 - h1
+    entry_height = roll_pass.in_profile.equivalent_height
+    exit_height = roll_pass.out_profile.equivalent_height
+    draft = entry_height - exit_height
     contact_length = math.sqrt(max(working_radius * draft - draft ** 2 / 4, 0.0))
-    mean_thickness = (h0 + h1) / 2
+    mean_thickness = (entry_height + exit_height) / 2
     return contact_length / mean_thickness
